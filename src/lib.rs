@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
-use hyper::header::ContentType;
+use hyper::header::{Accept, ContentType, qitem};
 use hyper::mime::{Mime, TopLevel, SubLevel, Attr, Value};
 use hyper::status::StatusCode;
 use reqwest::Client as ReqwestClient;
@@ -55,7 +55,7 @@ impl EurekaClient {
         info!("Connected {} on {}:{} to eureka server at {}",
               data.instance.app,
               data.instance.ip_addr,
-              data.instance.port,
+              data.instance.port.value,
               server_url);
         let eviction_duration = data.lease_info.eviction_duration_in_secs.unwrap_or(90) as u64;
         thread::spawn(move || {
@@ -74,6 +74,9 @@ impl EurekaClient {
 
     fn register(&self, data: &RegisterData) -> Result<String, EurekaError> {
         let resp = REQWEST_CLIENT.post(&format!("{}/v2/apps/{}", self.server_base, self.app_id))
+            .header(Accept(vec![qitem(Mime(TopLevel::Application,
+                                           SubLevel::Json,
+                                           vec![(Attr::Charset, Value::Utf8)]))]))
             .header(ContentType(Mime(TopLevel::Application,
                                      SubLevel::Json,
                                      vec![(Attr::Charset, Value::Utf8)])))
@@ -110,9 +113,9 @@ impl EurekaClient {
                              self.server_base,
                              self.app_id,
                              self.instance_id))
-            .header(ContentType(Mime(TopLevel::Application,
-                                     SubLevel::Json,
-                                     vec![(Attr::Charset, Value::Utf8)])))
+            .header(Accept(vec![qitem(Mime(TopLevel::Application,
+                                           SubLevel::Json,
+                                           vec![(Attr::Charset, Value::Utf8)]))]))
             .send()
             .map_err(EurekaError::Network)?;
         if resp.status().is_success() {
@@ -127,9 +130,9 @@ impl EurekaClient {
                           self.server_base,
                           self.app_id,
                           self.instance_id))
-            .header(ContentType(Mime(TopLevel::Application,
-                                     SubLevel::Json,
-                                     vec![(Attr::Charset, Value::Utf8)])))
+            .header(Accept(vec![qitem(Mime(TopLevel::Application,
+                                           SubLevel::Json,
+                                           vec![(Attr::Charset, Value::Utf8)]))]))
             .send()
             .map_err(EurekaError::Network)?;
         if resp.status().is_success() {
@@ -139,25 +142,11 @@ impl EurekaClient {
         }
     }
 
-    fn get_instances(&self) -> Result<Vec<AppInstance>, EurekaError> {
-        let mut resp = REQWEST_CLIENT.get(&format!("{}/v2/apps", self.server_base))
-            .header(ContentType(Mime(TopLevel::Application,
-                                     SubLevel::Json,
-                                     vec![(Attr::Charset, Value::Utf8)])))
-            .send()
-            .map_err(EurekaError::Network)?;
-        if resp.status().is_success() {
-            Ok(resp.json().unwrap())
-        } else {
-            Err(EurekaError::Request(*resp.status()))
-        }
-    }
-
     fn get_app_instances(&self, app_id: &str) -> Result<Vec<AppInstance>, EurekaError> {
         let mut resp = REQWEST_CLIENT.get(&format!("{}/v2/apps/{}", self.server_base, app_id))
-            .header(ContentType(Mime(TopLevel::Application,
-                                     SubLevel::Json,
-                                     vec![(Attr::Charset, Value::Utf8)])))
+            .header(Accept(vec![qitem(Mime(TopLevel::Application,
+                                           SubLevel::Json,
+                                           vec![(Attr::Charset, Value::Utf8)]))]))
             .send()
             .map_err(EurekaError::Network)?;
         if resp.status().is_success() {
@@ -188,10 +177,10 @@ pub struct AppInstance {
     pub vip_address: String,
     #[serde(rename = "secureVipAddress")]
     pub secure_vip_address: String,
-    pub status: register::StatusType,
-    pub port: u16,
+    pub status: StatusType,
+    pub port: PortInfo,
     #[serde(rename = "securePort")]
-    pub secure_port: u16,
+    pub secure_port: PortInfo,
     #[serde(rename = "homePageUrl")]
     pub home_page_url: String,
     #[serde(rename = "statusPageUrl")]
@@ -199,10 +188,81 @@ pub struct AppInstance {
     #[serde(rename = "healthCheckUrl")]
     pub health_check_url: String,
     #[serde(rename = "dataCenterInfo")]
-    pub data_center_info: register::DataCenterInfo,
+    pub data_center_info: DataCenterInfo,
     #[serde(rename = "leaseInfo")]
-    pub lease_info: register::LeaseInfo,
+    pub lease_info: LeaseInfo,
     pub metadata: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PortInfo {
+    #[serde(rename = "$")]
+    pub value: u16,
+    pub enabled: bool,
+}
+
+impl PortInfo {
+    pub fn new(port: Option<u16>, secure: bool) -> Self {
+        PortInfo {
+            value: port.unwrap_or_else(|| if secure { 443 } else { 80 }),
+            enabled: port.is_some(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataCenterInfo {
+    pub name: DcNameType,
+    /// metadata is only required if name is Amazon
+    pub metadata: Option<AmazonMetadataType>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaseInfo {
+    #[serde(rename = "evictionDurationInSecs")]
+    pub eviction_duration_in_secs: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DcNameType {
+    MyOwn,
+    Amazon,
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum StatusType {
+    UP,
+    DOWN,
+    STARTING,
+    OUT_OF_SERVICE,
+    UNKNOWN,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AmazonMetadataType {
+    #[serde(rename = "ami-launch-index")]
+    pub ami_launch_index: String,
+    #[serde(rename = "local-hostname")]
+    pub local_hostname: String,
+    #[serde(rename = "availability-zone")]
+    pub availability_zone: String,
+    #[serde(rename = "instance-id")]
+    pub instance_id: String,
+    #[serde(rename = "public-ipv4")]
+    pub public_ipv4: String,
+    #[serde(rename = "public-hostname")]
+    pub public_hostname: String,
+    #[serde(rename = "ami-manifest-path")]
+    pub ami_manifest_path: String,
+    #[serde(rename = "local-ipv4")]
+    pub local_ipv4: String,
+    #[serde(rename = "hostname")]
+    pub hostname: String,
+    #[serde(rename = "ami-id")]
+    pub ami_id: String,
+    #[serde(rename = "instance-type")]
+    pub instance_type: String,
 }
 
 quick_error! {
