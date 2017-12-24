@@ -4,7 +4,7 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use reqwest::{Client as ReqwestClient, Method};
+use reqwest::Method;
 use serde_json::{self, Value};
 use serde_yaml;
 
@@ -12,10 +12,6 @@ use {EurekaError, DEFAULT_CONFIG};
 use aws::AwsMetadata;
 use register::{Instance, Registry};
 use resolver::*;
-
-lazy_static! {
-    static ref REQWEST_CLIENT: ReqwestClient = ReqwestClient::new();
-}
 
 fn load_yaml<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Value>, EurekaError> {
     Ok(
@@ -90,27 +86,15 @@ impl EurekaClient {
     }
 
     fn instance_id(&self) -> &str {
-        let instance = self.config
-            .get(&String::from("instance"))
-            .unwrap()
-            .as_object()
-            .unwrap();
-        if instance.contains_key(&String::from("instanceId")) {
-            return instance
-                .get(&String::from("instanceId"))
-                .unwrap()
-                .as_str()
-                .unwrap();
+        let instance = self.config[&String::from("instance")].as_object().unwrap();
+        if let Some(instance_id) = instance.get(&String::from("instanceId")) {
+            return instance_id.as_str().unwrap();
         }
         if self.is_amazon_datacenter() {
             return instance
                 .get(&String::from("dataCenterInfo"))
                 .unwrap()
-                .as_object()
-                .unwrap()
                 .get(&String::from("metadata"))
-                .unwrap()
-                .as_object()
                 .unwrap()
                 .get(&String::from("instance-id"))
                 .unwrap()
@@ -149,105 +133,73 @@ impl EurekaClient {
         }
     }
 
-    fn start<F: Fn()>(&mut self, callback: &Option<F>) -> Result<(), EurekaError> {
+    fn start<F: Fn()>(&mut self) -> Result<(), EurekaError> {
         if self.metadata_client.is_some()
-            && self.config
-                .get(&String::from("eureka"))
-                .unwrap()
-                .as_object()
-                .unwrap()
+            && self.config[&String::from("eureka")]
                 .get(&String::from("fetchMetadata"))
                 .unwrap_or_else(|| &Value::Bool(false))
                 .as_bool()
                 .unwrap()
         {
-            self.add_instance_metadata(callback);
+            self.add_instance_metadata();
         }
-        if self.config
-            .get(&String::from("eureka"))
-            .unwrap()
-            .as_object()
-            .unwrap()
+        if self.config[&String::from("eureka")]
             .get(&String::from("registerWithEureka"))
             .unwrap_or_else(|| &Value::Bool(false))
             .as_bool()
             .unwrap()
         {
-            self.register(callback);
+            self.register();
             self.start_heartbeats();
         }
-        if self.config
-            .get(&String::from("eureka"))
-            .unwrap()
-            .as_object()
-            .unwrap()
+        if self.config[&String::from("eureka")]
             .get(&String::from("fetchRegistry"))
             .unwrap_or_else(|| &Value::Bool(false))
             .as_bool()
             .unwrap()
         {
             self.start_registry_fetches();
-            if self.config
-                .get(&String::from("eureka"))
-                .unwrap()
-                .as_object()
-                .unwrap()
+            if self.config[&String::from("eureka")]
                 .get(&String::from("waitForRegistry"))
                 .unwrap_or_else(|| &Value::Bool(false))
                 .as_bool()
                 .unwrap()
             {
-                self.wait_for_registry_update(callback)?;
+                self.wait_for_registry_update()?;
             } else {
-                self.fetch_registry(callback);
+                self.fetch_registry();
             }
-        } else if let &Some(ref cb) = callback {
-            cb();
         }
         Ok(())
     }
 
-    fn wait_for_registry_update<F: Fn()>(&self, callback: &Option<F>) -> Result<(), EurekaError> {
-        self.fetch_registry(&Some(|| {
-            loop {
-                let instances = self.get_instances_by_vip_address(
-                    self.config
-                        .get("instance")
-                        .unwrap()
-                        .as_object()
-                        .unwrap()
-                        .get(&String::from("vipAddress"))
-                        .map_or("", |i| i.as_str().unwrap()),
-                );
-                if instances.is_empty() {
-                    thread::sleep(Duration::from_secs(2));
-                } else {
-                    break;
-                }
+    fn wait_for_registry_update(&self) -> Result<(), EurekaError> {
+        self.fetch_registry();
+        loop {
+            let instances = self.get_instances_by_vip_address(
+                self.config["instance"]
+                    .get(&String::from("vipAddress"))
+                    .map_or("", |i| i.as_str().unwrap()),
+            );
+            if instances.is_empty() {
+                thread::sleep(Duration::from_secs(2));
+            } else {
+                break;
             }
-            if let &Some(ref cb) = callback {
-                cb();
-            }
-        }));
+        }
         Ok(())
     }
 
-    fn stop<F: Fn()>(&mut self, callback: &Option<F>) {
+    fn stop(&mut self) {
         self.registry_fetch_active = false;
-        if self.config
-            .get(&String::from("eureka"))
-            .unwrap()
-            .as_object()
-            .unwrap()
+        if self.config[&String::from("eureka")]
             .get(&String::from("registerWithEureka"))
             .unwrap_or_else(|| &Value::Bool(false))
             .as_bool()
             .unwrap()
         {
             self.heartbeat_active = false;
-            self.deregister(callback);
-        } else if let &Some(ref cb) = callback {
-            cb();
+            self.deregister();
         }
     }
 
@@ -283,7 +235,7 @@ impl EurekaClient {
         Ok(())
     }
 
-    fn register<F: Fn()>(&mut self, callback: &Option<F>) {
+    fn register(&mut self) {
         *self.config
             .get_mut(&String::from("instance"))
             .unwrap()
@@ -291,11 +243,7 @@ impl EurekaClient {
             .unwrap()
             .entry(String::from("status"))
             .or_insert_with(|| Value::String(String::new())) = Value::String(String::from("UP"));
-        let instance = self.config
-            .get(&String::from("instance"))
-            .unwrap()
-            .as_object()
-            .unwrap();
+        let instance = self.config[&String::from("instance")].as_object().unwrap();
         let uri = instance.get("app").unwrap().as_str().unwrap().to_owned();
         let mut body = HashMap::with_capacity(1);
         body.insert("instance", instance);
@@ -305,12 +253,11 @@ impl EurekaClient {
                 uri,
                 body: Some(serde_json::to_value(body).unwrap()),
             },
-            &Some(|| {}),
             0,
         )
     }
 
-    fn deregister<F: Fn()>(&self, callback: &Option<F>) {
+    fn deregister(&self) {
         unimplemented!()
     }
 
@@ -334,7 +281,7 @@ impl EurekaClient {
         unimplemented!()
     }
 
-    fn fetch_registry<F: Fn()>(&self, callback: &Option<F>) {
+    fn fetch_registry(&self) -> Registry {
         unimplemented!()
     }
 
@@ -354,16 +301,11 @@ impl EurekaClient {
         unimplemented!()
     }
 
-    fn add_instance_metadata<F: Fn()>(&self, callback: &Option<F>) {
+    fn add_instance_metadata(&self) {
         unimplemented!()
     }
 
-    fn eureka_request<F: Fn()>(
-        &self,
-        opts: &EurekaRequestConfig,
-        callback: &Option<F>,
-        retry_attempts: usize,
-    ) {
+    fn eureka_request(&self, opts: &EurekaRequestConfig, retry_attempts: usize) {
         unimplemented!()
     }
 }

@@ -22,7 +22,7 @@ pub use client::EurekaClient;
 
 use std::collections::HashMap;
 
-use reqwest::StatusCode;
+use reqwest::{Client, StatusCode};
 use reqwest::Error as ReqwestError;
 use serde_json::{Map, Number, Value};
 use serde_yaml::Value as YamlValue;
@@ -50,6 +50,7 @@ lazy_static! {
         config.insert(String::from("instance"), Value::Object(Map::new()));
         config
     };
+    pub static ref REQWEST_CLIENT: Client = Client::new();
 }
 
 quick_error! {
@@ -92,9 +93,7 @@ fn map_yaml_to_json(yaml: YamlValue) -> Value {
         ),
         YamlValue::Number(_) => unreachable!(),
         YamlValue::String(str) => Value::String(str),
-        YamlValue::Sequence(seq) => {
-            Value::Array(seq.into_iter().map(map_yaml_to_json).collect())
-        }
+        YamlValue::Sequence(seq) => Value::Array(seq.into_iter().map(map_yaml_to_json).collect()),
         YamlValue::Mapping(map) => Value::Object(
             map.into_iter()
                 .map(|(k, v)| (k.as_str().unwrap().to_string(), map_yaml_to_json(v)))
