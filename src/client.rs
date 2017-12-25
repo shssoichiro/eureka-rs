@@ -4,7 +4,7 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use reqwest::Method;
+use reqwest::{Method, Response, Result as ReqwestResult};
 use serde_json::{self, Value};
 use serde_yaml;
 
@@ -71,16 +71,16 @@ impl EurekaClient {
                     eureka.get(&String::from("useDns")).is_some()
                 })
             }) {
-                Box::new(DnsClusterResolver::new(config))
+                Box::new(DnsClusterResolver::new(&config))
             } else {
-                Box::new(ConfigClusterResolver::new(config))
+                Box::new(ConfigClusterResolver::new(&config))
             },
             cache: EurekaCache::default(),
             registry_fetch_active: false,
             heartbeat_active: false,
         };
         if client.is_amazon_datacenter() {
-            client.metadata_client = Some(AwsMetadata::default());
+            client.metadata_client = Some(AwsMetadata::new(&config));
         }
         Ok(client)
     }
@@ -235,7 +235,7 @@ impl EurekaClient {
         Ok(())
     }
 
-    fn register(&mut self) {
+    fn register(&mut self) -> Result<(), EurekaError> {
         *self.config
             .get_mut(&String::from("instance"))
             .unwrap()
@@ -247,18 +247,58 @@ impl EurekaClient {
         let uri = instance.get("app").unwrap().as_str().unwrap().to_owned();
         let mut body = HashMap::with_capacity(1);
         body.insert("instance", instance);
-        self.eureka_request(
+        let response = self.eureka_request(
             &EurekaRequestConfig {
                 method: Method::Post,
                 uri,
                 body: Some(serde_json::to_value(body).unwrap()),
             },
             0,
-        )
+        ).and_then(Response::error_for_status);
+        match response {
+            Ok(_) => {
+                info!(
+                    "Registered with eureka: {}/{}",
+                    instance.get("app").unwrap().as_str().unwrap(),
+                    self.instance_id()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Error registering with eureka: {}", e);
+                Err(EurekaError::Network(e))
+            }
+        }
     }
 
-    fn deregister(&self) {
-        unimplemented!()
+    fn deregister(&self) -> Result<(), EurekaError> {
+        let instance = self.config[&String::from("instance")].as_object().unwrap();
+        let response = self.eureka_request(
+            &EurekaRequestConfig {
+                method: Method::Delete,
+                uri: format!(
+                    "{}/{}",
+                    instance.get("app").unwrap().as_str().unwrap(),
+                    self.instance_id()
+                ),
+                body: None,
+            },
+            0,
+        ).and_then(Response::error_for_status);
+        match response {
+            Ok(_) => {
+                info!(
+                    "De-registered with eureka: {}/{}",
+                    instance.get("app").unwrap().as_str().unwrap(),
+                    self.instance_id()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Error deregistering with eureka: {}", e);
+                Err(EurekaError::Network(e))
+            }
+        }
     }
 
     fn start_heartbeats(&self) {
@@ -305,7 +345,11 @@ impl EurekaClient {
         unimplemented!()
     }
 
-    fn eureka_request(&self, opts: &EurekaRequestConfig, retry_attempts: usize) {
+    fn eureka_request(
+        &self,
+        opts: &EurekaRequestConfig,
+        retry_attempts: usize,
+    ) -> ReqwestResult<Response> {
         unimplemented!()
     }
 }

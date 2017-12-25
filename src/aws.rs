@@ -53,11 +53,11 @@ impl AwsMetadata {
         let mut response = REQWEST_CLIENT
             .get(&format!("http://{}/latest/meta-data/{}", self.host, key))
             .send()
+            .and_then(Response::error_for_status)
             .map_err(|e| {
                 error!("Error requesting metadata key: {}", e);
                 e
             })
-            .and_then(Response::error_for_status)
             .ok()?;
         response.text().ok()
     }
@@ -69,20 +69,23 @@ impl AwsMetadata {
                 self.host
             ))
             .send()
+            .and_then(Response::error_for_status)
             .map_err(|e| {
                 error!("Error requesting instance identity document: {}", e);
                 e
             })
-            .and_then(Response::error_for_status)
             .ok()?;
         response.json().ok()
     }
 }
 
-impl Default for AwsMetadata {
-    fn default() -> Self {
+impl AwsMetadata {
+    pub fn new(config: &HashMap<String, Value>) -> Self {
         AwsMetadata {
-            host: String::from("169.254.169.254"),
+            host: config
+                .get("host")
+                .map(|host| host.as_str().unwrap().to_string())
+                .unwrap_or_else(|| String::from("169.254.169.254")),
         }
     }
 }

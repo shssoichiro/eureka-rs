@@ -11,7 +11,7 @@ pub trait ClusterResolver: Debug {
 pub struct ConfigClusterResolver {}
 
 impl ConfigClusterResolver {
-    pub fn new(config: HashMap<String, Value>) -> Self {
+    pub fn new(config: &HashMap<String, Value>) -> Self {
         unimplemented!()
     }
 
@@ -30,7 +30,7 @@ impl ClusterResolver for ConfigClusterResolver {
 pub struct DnsClusterResolver {}
 
 impl DnsClusterResolver {
-    pub fn new(config: HashMap<String, Value>) -> Self {
+    pub fn new(config: &HashMap<String, Value>) -> Self {
         unimplemented!()
     }
 
