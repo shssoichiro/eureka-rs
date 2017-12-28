@@ -301,11 +301,24 @@ impl EurekaClient {
         }
     }
 
-    fn start_heartbeats(&self) {
-        unimplemented!()
+    fn start_heartbeats(&mut self) {
+        self.heartbeat_active = true;
+        let interval = self.config[&String::from("eureka")]
+            .as_object()
+            .unwrap()
+            .get("heartbeatInterval")
+            .unwrap()
+            .as_u64()
+            .unwrap();
+        thread::spawn(move || {
+            while self.heartbeat_active {
+                self.renew();
+                thread::sleep(Duration::from_millis(interval));
+            }
+        });
     }
 
-    fn renew(&self) {
+    fn renew(&mut self) {
         unimplemented!()
     }
 

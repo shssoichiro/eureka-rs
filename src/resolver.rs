@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use serde_json::Value;
 
-pub trait ClusterResolver: Debug {
+pub trait ClusterResolver: Debug + Send + Sync {
     fn resolve_eureka_url(&self, retry_attempts: usize);
 }
 
