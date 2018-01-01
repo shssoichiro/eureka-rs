@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -27,7 +29,8 @@ pub struct EurekaClient {
     cluster_resolver: Box<ClusterResolver>,
     cache: EurekaCache,
     registry_fetch_active: bool,
-    heartbeat_active: bool,
+    heartbeat_active: Arc<AtomicBool>,
+    instance_client: Arc<InstanceClient>,
 }
 
 impl EurekaClient {
@@ -58,11 +61,10 @@ impl EurekaClient {
             .chain(default_yaml.into_iter())
             .chain((*DEFAULT_CONFIG).clone().into_iter())
         {
-            if !config.contains_key(&key) {
-                config.insert(key, prop);
-            }
+            config.entry(key).or_insert(prop);
         }
         Self::validate_config(&config)?;
+        Self::mark_as_up(&mut config);
         let mut client = EurekaClient {
             config: config.clone(),
             metadata_client: None,
@@ -77,60 +79,15 @@ impl EurekaClient {
             },
             cache: EurekaCache::default(),
             registry_fetch_active: false,
-            heartbeat_active: false,
+            heartbeat_active: Arc::new(AtomicBool::new(false)),
+            instance_client: Arc::new(InstanceClient::new(
+                serde_json::from_value(config[&String::from("instance")].clone()).unwrap(),
+            )),
         };
-        if client.is_amazon_datacenter() {
+        if client.instance_client.is_amazon_datacenter() {
             client.metadata_client = Some(AwsMetadata::new(&config));
         }
         Ok(client)
-    }
-
-    fn instance_id(&self) -> &str {
-        let instance = self.config[&String::from("instance")].as_object().unwrap();
-        if let Some(instance_id) = instance.get(&String::from("instanceId")) {
-            return instance_id.as_str().unwrap();
-        }
-        if self.is_amazon_datacenter() {
-            return instance
-                .get(&String::from("dataCenterInfo"))
-                .unwrap()
-                .get(&String::from("metadata"))
-                .unwrap()
-                .get(&String::from("instance-id"))
-                .unwrap()
-                .as_str()
-                .unwrap();
-        }
-        instance
-            .get(&String::from("hostName"))
-            .unwrap()
-            .as_str()
-            .unwrap()
-    }
-
-    fn is_amazon_datacenter(&self) -> bool {
-        let instance_value = match self.config.get("instance") {
-            Some(x) => x,
-            None => {
-                return false;
-            }
-        };
-        let instance = match instance_value.as_object() {
-            Some(x) => x,
-            None => {
-                return false;
-            }
-        };
-        let name_value = match instance.get(&"name".to_string()) {
-            Some(x) => x,
-            None => {
-                return false;
-            }
-        };
-        match name_value.as_str() {
-            Some(x) => x == "amazon",
-            None => false,
-        }
     }
 
     fn start<F: Fn()>(&mut self) -> Result<(), EurekaError> {
@@ -149,7 +106,7 @@ impl EurekaClient {
             .as_bool()
             .unwrap()
         {
-            self.register();
+            self.register()?;
             self.start_heartbeats();
         }
         if self.config[&String::from("eureka")]
@@ -190,7 +147,7 @@ impl EurekaClient {
         Ok(())
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self) -> Result<(), EurekaError> {
         self.registry_fetch_active = false;
         if self.config[&String::from("eureka")]
             .get(&String::from("registerWithEureka"))
@@ -198,21 +155,21 @@ impl EurekaClient {
             .as_bool()
             .unwrap()
         {
-            self.heartbeat_active = false;
-            self.deregister();
+            self.heartbeat_active.store(false, Ordering::Relaxed);
+            self.instance_client.deregister()?;
         }
+        Ok(())
     }
 
     fn validate_config(config: &HashMap<String, Value>) -> Result<(), EurekaError> {
         let validate = |namespace: String, key: String| -> Result<(), EurekaError> {
-            match config.get(&namespace) {
-                Some(ns) => match ns.as_object() {
+            if let Some(ns) = config.get(&namespace) {
+                match ns.as_object() {
                     Some(ns) if ns.contains_key(&key) => {
                         return Ok(());
                     }
                     _ => {}
-                },
-                _ => {}
+                }
             };
             Err(EurekaError::Configuration(format!(
                 "Missing \"{}.{}\" config value.",
@@ -235,74 +192,22 @@ impl EurekaClient {
         Ok(())
     }
 
-    fn register(&mut self) -> Result<(), EurekaError> {
-        *self.config
+    fn register(&self) -> Result<(), EurekaError> {
+        self.instance_client.register()
+    }
+
+    fn mark_as_up(config: &mut HashMap<String, Value>) {
+        *config
             .get_mut(&String::from("instance"))
             .unwrap()
             .as_object_mut()
             .unwrap()
             .entry(String::from("status"))
             .or_insert_with(|| Value::String(String::new())) = Value::String(String::from("UP"));
-        let instance = self.config[&String::from("instance")].as_object().unwrap();
-        let uri = instance.get("app").unwrap().as_str().unwrap().to_owned();
-        let mut body = HashMap::with_capacity(1);
-        body.insert("instance", instance);
-        let response = self.eureka_request(
-            &EurekaRequestConfig {
-                method: Method::Post,
-                uri,
-                body: Some(serde_json::to_value(body).unwrap()),
-            },
-            0,
-        ).and_then(Response::error_for_status);
-        match response {
-            Ok(_) => {
-                info!(
-                    "Registered with eureka: {}/{}",
-                    instance.get("app").unwrap().as_str().unwrap(),
-                    self.instance_id()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                warn!("Error registering with eureka: {}", e);
-                Err(EurekaError::Network(e))
-            }
-        }
     }
 
-    fn deregister(&self) -> Result<(), EurekaError> {
-        let instance = self.config[&String::from("instance")].as_object().unwrap();
-        let response = self.eureka_request(
-            &EurekaRequestConfig {
-                method: Method::Delete,
-                uri: format!(
-                    "{}/{}",
-                    instance.get("app").unwrap().as_str().unwrap(),
-                    self.instance_id()
-                ),
-                body: None,
-            },
-            0,
-        ).and_then(Response::error_for_status);
-        match response {
-            Ok(_) => {
-                info!(
-                    "De-registered with eureka: {}/{}",
-                    instance.get("app").unwrap().as_str().unwrap(),
-                    self.instance_id()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                warn!("Error deregistering with eureka: {}", e);
-                Err(EurekaError::Network(e))
-            }
-        }
-    }
-
-    fn start_heartbeats(&mut self) {
-        self.heartbeat_active = true;
+    fn start_heartbeats(&self) {
+        self.heartbeat_active.store(true, Ordering::Relaxed);
         let interval = self.config[&String::from("eureka")]
             .as_object()
             .unwrap()
@@ -310,16 +215,14 @@ impl EurekaClient {
             .unwrap()
             .as_u64()
             .unwrap();
+        let heartbeat = Arc::clone(&self.heartbeat_active);
+        let instance_client = Arc::clone(&self.instance_client);
         thread::spawn(move || {
-            while self.heartbeat_active {
-                self.renew();
+            while heartbeat.load(Ordering::Relaxed) {
+                instance_client.renew();
                 thread::sleep(Duration::from_millis(interval));
             }
         });
-    }
-
-    fn renew(&mut self) {
-        unimplemented!()
     }
 
     fn start_registry_fetches(&self) {
@@ -357,13 +260,104 @@ impl EurekaClient {
     fn add_instance_metadata(&self) {
         unimplemented!()
     }
+}
 
-    fn eureka_request(
-        &self,
-        opts: &EurekaRequestConfig,
-        retry_attempts: usize,
-    ) -> ReqwestResult<Response> {
+#[derive(Debug)]
+struct InstanceClient {
+    instance: HashMap<String, Value>,
+}
+
+impl InstanceClient {
+    pub fn new(instance: HashMap<String, Value>) -> Self {
+        InstanceClient { instance }
+    }
+
+    pub fn register(&self) -> Result<(), EurekaError> {
+        let uri = self.instance["app"].as_str().unwrap().to_owned();
+        let mut body = HashMap::with_capacity(1);
+        body.insert("instance", &self.instance);
+        let response = eureka_request(
+            &EurekaRequestConfig {
+                method: Method::Post,
+                uri,
+                body: Some(serde_json::to_value(body).unwrap()),
+            },
+            0,
+        ).and_then(Response::error_for_status);
+        match response {
+            Ok(_) => {
+                info!(
+                    "Registered with eureka: {}/{}",
+                    self.instance["app"].as_str().unwrap(),
+                    self.instance_id()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Error registering with eureka: {}", e);
+                Err(EurekaError::Network(e))
+            }
+        }
+    }
+
+    pub fn renew(&self) {
         unimplemented!()
+    }
+
+    pub fn deregister(&self) -> Result<(), EurekaError> {
+        let response = eureka_request(
+            &EurekaRequestConfig {
+                method: Method::Delete,
+                uri: format!(
+                    "{}/{}",
+                    self.instance["app"].as_str().unwrap(),
+                    self.instance_id()
+                ),
+                body: None,
+            },
+            0,
+        ).and_then(Response::error_for_status);
+        match response {
+            Ok(_) => {
+                info!(
+                    "De-registered with eureka: {}/{}",
+                    self.instance["app"].as_str().unwrap(),
+                    self.instance_id()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Error deregistering with eureka: {}", e);
+                Err(EurekaError::Network(e))
+            }
+        }
+    }
+
+    fn instance_id(&self) -> String {
+        if let Some(instance_id) = self.instance.get(&String::from("instanceId")) {
+            return instance_id.as_str().unwrap().into();
+        }
+        if self.is_amazon_datacenter() {
+            return self.instance[&String::from("dataCenterInfo")]
+                .get(&String::from("metadata"))
+                .unwrap()
+                .get(&String::from("instance-id"))
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .into();
+        }
+        self.instance[&String::from("hostName")]
+            .as_str()
+            .unwrap()
+            .into()
+    }
+
+    pub fn is_amazon_datacenter(&self) -> bool {
+        self.instance
+            .get(&"name".to_string())
+            .and_then(|name| Some(name.as_str().map(|s| s == "amazon").unwrap_or(false)))
+            .unwrap_or(false)
     }
 }
 
@@ -387,4 +381,8 @@ struct EurekaRequestConfig {
     pub method: Method,
     pub uri: String,
     pub body: Option<Value>,
+}
+
+fn eureka_request(opts: &EurekaRequestConfig, retry_attempts: usize) -> ReqwestResult<Response> {
+    unimplemented!()
 }
