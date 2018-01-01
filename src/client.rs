@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use reqwest::{Method, Response, Result as ReqwestResult};
+use reqwest::{Method, Response, Result as ReqwestResult, StatusCode};
 use serde_json::{self, Value};
 use serde_yaml;
 
@@ -27,8 +27,8 @@ pub struct EurekaClient {
     config: HashMap<String, Value>,
     metadata_client: Option<AwsMetadata>,
     cluster_resolver: Box<ClusterResolver>,
-    cache: EurekaCache,
-    registry_fetch_active: bool,
+    registry_fetch_active: Arc<AtomicBool>,
+    registry_client: Arc<RegistryClient>,
     heartbeat_active: Arc<AtomicBool>,
     instance_client: Arc<InstanceClient>,
 }
@@ -68,17 +68,19 @@ impl EurekaClient {
         let mut client = EurekaClient {
             config: config.clone(),
             metadata_client: None,
-            cluster_resolver: if config.get("eureka").map_or(false, |eureka| {
-                eureka.as_object().map_or(false, |eureka| {
-                    eureka.get(&String::from("useDns")).is_some()
-                })
-            }) {
+            cluster_resolver: if config
+                .get("eureka")
+                .and_then(|eureka| eureka.as_object())
+                .and_then(|eureka| eureka.get(&String::from("useDns")))
+                .and_then(|dns| dns.as_bool())
+                .unwrap_or(false)
+            {
                 Box::new(DnsClusterResolver::new(&config))
             } else {
                 Box::new(ConfigClusterResolver::new(&config))
             },
-            cache: EurekaCache::default(),
-            registry_fetch_active: false,
+            registry_fetch_active: Arc::new(AtomicBool::new(false)),
+            registry_client: Arc::new(RegistryClient::new()),
             heartbeat_active: Arc::new(AtomicBool::new(false)),
             instance_client: Arc::new(InstanceClient::new(
                 serde_json::from_value(config[&String::from("instance")].clone()).unwrap(),
@@ -106,7 +108,7 @@ impl EurekaClient {
             .as_bool()
             .unwrap()
         {
-            self.register()?;
+            self.instance_client.register()?;
             self.start_heartbeats();
         }
         if self.config[&String::from("eureka")]
@@ -124,14 +126,14 @@ impl EurekaClient {
             {
                 self.wait_for_registry_update()?;
             } else {
-                self.fetch_registry();
+                self.registry_client.fetch_registry()?;
             }
         }
         Ok(())
     }
 
     fn wait_for_registry_update(&self) -> Result<(), EurekaError> {
-        self.fetch_registry();
+        self.registry_client.fetch_registry()?;
         loop {
             let instances = self.get_instances_by_vip_address(
                 self.config["instance"]
@@ -148,7 +150,7 @@ impl EurekaClient {
     }
 
     fn stop(&mut self) -> Result<(), EurekaError> {
-        self.registry_fetch_active = false;
+        self.registry_fetch_active.store(false, Ordering::Relaxed);
         if self.config[&String::from("eureka")]
             .get(&String::from("registerWithEureka"))
             .unwrap_or_else(|| &Value::Bool(false))
@@ -192,10 +194,6 @@ impl EurekaClient {
         Ok(())
     }
 
-    fn register(&self) -> Result<(), EurekaError> {
-        self.instance_client.register()
-    }
-
     fn mark_as_up(config: &mut HashMap<String, Value>) {
         *config
             .get_mut(&String::from("instance"))
@@ -226,7 +224,22 @@ impl EurekaClient {
     }
 
     fn start_registry_fetches(&self) {
-        unimplemented!()
+        self.registry_fetch_active.store(true, Ordering::Relaxed);
+        let interval = self.config[&String::from("eureka")]
+            .as_object()
+            .unwrap()
+            .get("registryFetchInterval")
+            .unwrap()
+            .as_u64()
+            .unwrap();
+        let registry_fetch = Arc::clone(&self.registry_fetch_active);
+        let registry_client = Arc::clone(&self.registry_client);
+        thread::spawn(move || {
+            while registry_fetch.load(Ordering::Relaxed) {
+                let _ = registry_client.fetch_registry();
+                thread::sleep(Duration::from_millis(interval));
+            }
+        });
     }
 
     fn get_instances_by_app_id(&self, app_id: &str) -> Vec<Instance> {
@@ -234,18 +247,6 @@ impl EurekaClient {
     }
 
     fn get_instances_by_vip_address(&self, vip_address: &str) -> Vec<Instance> {
-        unimplemented!()
-    }
-
-    fn fetch_registry(&self) -> Registry {
-        unimplemented!()
-    }
-
-    fn transform_registry(&self, registry: Registry) {
-        unimplemented!()
-    }
-
-    fn transform_app(&self, app: &str, cache: EurekaCache) {
         unimplemented!()
     }
 
@@ -259,6 +260,12 @@ impl EurekaClient {
 
     fn add_instance_metadata(&self) {
         unimplemented!()
+    }
+}
+
+impl Drop for EurekaClient {
+    fn drop(&mut self) {
+        let _ = self.stop();
     }
 }
 
@@ -301,7 +308,37 @@ impl InstanceClient {
     }
 
     pub fn renew(&self) {
-        unimplemented!()
+        let response = eureka_request(
+            &EurekaRequestConfig {
+                method: Method::Put,
+                uri: format!(
+                    "{}/{}",
+                    self.instance["app"].as_str().unwrap(),
+                    self.instance_id()
+                ),
+                body: None,
+            },
+            0,
+        );
+        match response {
+            Ok(mut res) => {
+                if res.status() == StatusCode::NotFound {
+                    warn!("Eureka heartbeat failed, re-registering app");
+                    let _ = self.register();
+                } else if !res.status().is_success() {
+                    warn!(
+                        "Eureka heartbeat failed, will retry. Status code: {}, body: {:?}",
+                        res.status(),
+                        res.text()
+                    );
+                } else {
+                    debug!("Eureka heartbeat success");
+                }
+            }
+            Err(e) => {
+                error!("An error in the request occurred: {}", e);
+            }
+        };
     }
 
     pub fn deregister(&self) -> Result<(), EurekaError> {
@@ -358,6 +395,51 @@ impl InstanceClient {
             .get(&"name".to_string())
             .and_then(|name| Some(name.as_str().map(|s| s == "amazon").unwrap_or(false)))
             .unwrap_or(false)
+    }
+}
+
+#[derive(Debug)]
+struct RegistryClient {
+    cache: EurekaCache,
+}
+
+impl RegistryClient {
+    pub fn new() -> Self {
+        RegistryClient {
+            cache: EurekaCache::default(),
+        }
+    }
+
+    pub fn fetch_registry(&self) -> Result<(), EurekaError> {
+        let response = eureka_request(
+            &EurekaRequestConfig {
+                method: Method::Get,
+                uri: String::new(),
+                body: None,
+            },
+            0,
+        ).and_then(Response::error_for_status);
+        match response {
+            Ok(mut resp) => {
+                debug!("Retrieved registry successfully");
+                self.transform_registry(resp.json().map_err(|_| {
+                    EurekaError::UnexpectedState("Failed to parse registry response.".into())
+                })?);
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Error fetching registry: {}", e);
+                Err(EurekaError::Network(e))
+            }
+        }
+    }
+
+    fn transform_registry(&self, registry: Registry) {
+        unimplemented!()
+    }
+
+    fn transform_app(&self, app: &str, cache: EurekaCache) {
+        unimplemented!()
     }
 }
 
