@@ -1,7 +1,17 @@
 use std::collections::HashMap;
 
+use serde_json::Value;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Registry {}
+pub struct Registry {
+    pub applications: RegistryApplications,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryApplications {
+    /// Either a `RegisterData` or a `Vec<RegisterData>`
+    pub application: Value,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterData {

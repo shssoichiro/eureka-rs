@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -12,7 +12,7 @@ use serde_yaml;
 
 use {EurekaError, DEFAULT_CONFIG};
 use aws::AwsMetadata;
-use register::{Instance, Registry};
+use register::{Instance, RegisterData, Registry};
 use resolver::*;
 
 fn load_yaml<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Value>, EurekaError> {
@@ -135,7 +135,7 @@ impl EurekaClient {
     fn wait_for_registry_update(&self) -> Result<(), EurekaError> {
         self.registry_client.fetch_registry()?;
         loop {
-            let instances = self.get_instances_by_vip_address(
+            let instances = self.registry_client.get_instances_by_vip_address(
                 self.config["instance"]
                     .get(&String::from("vipAddress"))
                     .map_or("", |i| i.as_str().unwrap()),
@@ -240,14 +240,6 @@ impl EurekaClient {
                 thread::sleep(Duration::from_millis(interval));
             }
         });
-    }
-
-    fn get_instances_by_app_id(&self, app_id: &str) -> Vec<Instance> {
-        unimplemented!()
-    }
-
-    fn get_instances_by_vip_address(&self, vip_address: &str) -> Vec<Instance> {
-        unimplemented!()
     }
 
     fn validate_instance(&self, instance: Instance) -> bool {
@@ -400,13 +392,13 @@ impl InstanceClient {
 
 #[derive(Debug)]
 struct RegistryClient {
-    cache: EurekaCache,
+    cache: Mutex<EurekaCache>,
 }
 
 impl RegistryClient {
     pub fn new() -> Self {
         RegistryClient {
-            cache: EurekaCache::default(),
+            cache: Mutex::new(EurekaCache::default()),
         }
     }
 
@@ -435,11 +427,46 @@ impl RegistryClient {
     }
 
     fn transform_registry(&self, registry: Registry) {
+        let mut cache = EurekaCache::default();
+        if registry.applications.application.is_array() {
+            let apps: Vec<RegisterData> =
+                serde_json::from_value(registry.applications.application.clone()).unwrap();
+            for app in apps {
+                self.transform_app(app, &mut cache);
+            }
+        } else {
+            let app: RegisterData =
+                serde_json::from_value(registry.applications.application.clone()).unwrap();
+            self.transform_app(app, &mut cache);
+        }
+        *self.cache.lock().unwrap() = cache;
+    }
+
+    fn transform_app(&self, app: RegisterData, cache: &mut EurekaCache) {
         unimplemented!()
     }
 
-    fn transform_app(&self, app: &str, cache: EurekaCache) {
-        unimplemented!()
+    pub fn get_instances_by_app_id(&self, app_id: &str) -> Vec<Instance> {
+        let instances: Vec<Instance> = serde_json::from_value(
+            self.cache.lock().unwrap().app[&app_id.to_uppercase()].clone(),
+        ).unwrap_or_default();
+        if instances.is_empty() {
+            warn!("Unable to retrieve instances for app ID: {}", app_id);
+        }
+        instances
+    }
+
+    pub fn get_instances_by_vip_address(&self, vip_address: &str) -> Vec<Instance> {
+        let instances: Vec<Instance> = serde_json::from_value(
+            self.cache.lock().unwrap().vip[vip_address].clone(),
+        ).unwrap_or_default();
+        if instances.is_empty() {
+            warn!(
+                "Unable to retrieve instances for vip address: {}",
+                vip_address
+            );
+        }
+        instances
     }
 }
 
