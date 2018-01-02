@@ -5,6 +5,7 @@
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+extern crate percent_encoding;
 #[macro_use]
 extern crate quick_error;
 extern crate reqwest;
@@ -21,8 +22,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 
-use reqwest::{Client, StatusCode};
-use reqwest::Error as ReqwestError;
+use reqwest::{StatusCode, Error as ReqwestError};
 use serde_json::{Map, Number, Value};
 use serde_yaml::Value as YamlValue;
 
@@ -49,7 +49,6 @@ lazy_static! {
         config.insert(String::from("instance"), Value::Object(Map::new()));
         config
     };
-    pub static ref REQWEST_CLIENT: Client = Client::new();
 }
 
 quick_error! {
@@ -69,14 +68,14 @@ quick_error! {
             description(description)
         }
         FileNotFound {}
-        ParseError {}
+        ParseError(description: String) {}
     }
 }
 
 fn load_yaml<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Value>, EurekaError> {
     Ok(
         serde_yaml::from_reader(File::open(path).map_err(|_| EurekaError::FileNotFound)?)
-            .map_err(|_| EurekaError::ParseError)?,
+            .map_err(|e| EurekaError::ParseError(e.to_string()))?,
     )
 }
 
@@ -106,4 +105,13 @@ fn map_yaml_to_json(yaml: YamlValue) -> Value {
                 .collect(),
         ),
     }
+}
+
+fn path_segment_encode(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, percent_encoding::PATH_SEGMENT_ENCODE_SET)
+        .to_string()
+}
+
+fn query_encode(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, percent_encoding::QUERY_ENCODE_SET).to_string()
 }

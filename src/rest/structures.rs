@@ -41,7 +41,8 @@ pub struct DataCenterInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaseInfo {
     /// (optional) if you want to change the length of lease - default if 90 secs
-    #[serde(rename = "evictionDurationInSecs")] pub eviction_duration_in_secs: Option<usize>,
+    #[serde(rename = "evictionDurationInSecs")]
+    pub eviction_duration_in_secs: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
