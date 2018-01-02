@@ -14,13 +14,12 @@ extern crate serde_json;
 extern crate serde_yaml;
 
 mod aws;
-mod client;
-mod register;
+mod rest;
 mod resolver;
 
-pub use client::EurekaClient;
-
 use std::collections::HashMap;
+use std::fs::File;
+use std::path::Path;
 
 use reqwest::{Client, StatusCode};
 use reqwest::Error as ReqwestError;
@@ -72,6 +71,13 @@ quick_error! {
         FileNotFound {}
         ParseError {}
     }
+}
+
+fn load_yaml<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Value>, EurekaError> {
+    Ok(
+        serde_yaml::from_reader(File::open(path).map_err(|_| EurekaError::FileNotFound)?)
+            .map_err(|_| EurekaError::ParseError)?,
+    )
 }
 
 /// Maps in `serde_yaml` are more annoying to work with than in `serde_json` because they have

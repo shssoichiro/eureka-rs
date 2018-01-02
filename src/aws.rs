@@ -1,16 +1,25 @@
 use std::collections::HashMap;
 
-use reqwest::Response;
+use reqwest::{Client, Response};
 use serde_json::Value;
-
-use REQWEST_CLIENT;
 
 #[derive(Debug, Clone)]
 pub struct AwsMetadata {
+    client: Client,
     host: String,
 }
 
 impl AwsMetadata {
+    pub fn new(config: &HashMap<String, Value>) -> Self {
+        AwsMetadata {
+            client: Client::new(),
+            host: config
+                .get("host")
+                .map(|host| host.as_str().unwrap().to_string())
+                .unwrap_or_else(|| String::from("169.254.169.254")),
+        }
+    }
+
     fn fetch_metadata(&self) -> HashMap<&'static str, String> {
         let mut results = HashMap::with_capacity(11);
         results.insert("ami-id", self.lookup_metadata_key("ami-id"));
@@ -50,7 +59,7 @@ impl AwsMetadata {
     }
 
     fn lookup_metadata_key(&self, key: &str) -> Option<String> {
-        let mut response = REQWEST_CLIENT
+        let mut response = self.client
             .get(&format!("http://{}/latest/meta-data/{}", self.host, key))
             .send()
             .and_then(Response::error_for_status)
@@ -63,7 +72,7 @@ impl AwsMetadata {
     }
 
     fn lookup_instance_identity(&self) -> Option<HashMap<String, Value>> {
-        let mut response = REQWEST_CLIENT
+        let mut response = self.client
             .get(&format!(
                 "http://{}/latest/dynamic/instance-identity/document",
                 self.host
@@ -76,16 +85,5 @@ impl AwsMetadata {
             })
             .ok()?;
         response.json().ok()
-    }
-}
-
-impl AwsMetadata {
-    pub fn new(config: &HashMap<String, Value>) -> Self {
-        AwsMetadata {
-            host: config
-                .get("host")
-                .map(|host| host.as_str().unwrap().to_string())
-                .unwrap_or_else(|| String::from("169.254.169.254")),
-        }
     }
 }
