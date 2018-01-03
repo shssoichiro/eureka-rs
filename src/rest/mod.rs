@@ -87,8 +87,15 @@ impl EurekaRestClient {
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
             Ok(mut resp) => match resp.status() {
-                StatusCode::Ok => Ok(resp.json()
-                    .map_err(|e| EurekaError::ParseError(e.to_string()))?),
+                StatusCode::Ok => {
+                    let apps: AllApplications = resp.json()
+                        .map_err(|e| EurekaError::ParseError(e.to_string()))?;
+                    Ok(apps.applications
+                        .application
+                        .into_iter()
+                        .flat_map(|a| a.instance.into_iter())
+                        .collect())
+                }
                 _ => Err(EurekaError::Request(resp.status())),
             },
         }
@@ -106,8 +113,11 @@ impl EurekaRestClient {
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
             Ok(mut resp) => match resp.status() {
-                StatusCode::Ok => Ok(resp.json()
-                    .map_err(|e| EurekaError::ParseError(e.to_string()))?),
+                StatusCode::Ok => {
+                    let apps: ApplicationWrapper = resp.json()
+                        .map_err(|e| EurekaError::ParseError(e.to_string()))?;
+                    Ok(apps.application.instance)
+                }
                 _ => Err(EurekaError::Request(resp.status())),
             },
         }
@@ -130,27 +140,11 @@ impl EurekaRestClient {
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
             Ok(mut resp) => match resp.status() {
-                StatusCode::Ok => Ok(resp.json()
-                    .map_err(|e| EurekaError::ParseError(e.to_string()))?),
-                _ => Err(EurekaError::Request(resp.status())),
-            },
-        }
-    }
-
-    /// Query for a specific `instance_id`
-    pub fn get_instance(&self, instance_id: &str) -> Result<Instance, EurekaError> {
-        let resp = self.client
-            .get(&format!(
-                "{}/eureka/apps/{}",
-                self.base_url,
-                path_segment_encode(instance_id)
-            ))
-            .send();
-        match resp {
-            Err(e) => Err(EurekaError::Network(e)),
-            Ok(mut resp) => match resp.status() {
-                StatusCode::Ok => Ok(resp.json()
-                    .map_err(|e| EurekaError::ParseError(e.to_string()))?),
+                StatusCode::Ok => {
+                    let apps: InstanceWrapper = resp.json()
+                        .map_err(|e| EurekaError::ParseError(e.to_string()))?;
+                    Ok(apps.instance)
+                }
                 _ => Err(EurekaError::Request(resp.status())),
             },
         }
@@ -223,8 +217,15 @@ impl EurekaRestClient {
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
             Ok(mut resp) => match resp.status() {
-                StatusCode::Ok => Ok(resp.json()
-                    .map_err(|e| EurekaError::ParseError(e.to_string()))?),
+                StatusCode::Ok => {
+                    let apps: AllApplications = resp.json()
+                        .map_err(|e| EurekaError::ParseError(e.to_string()))?;
+                    Ok(apps.applications
+                        .application
+                        .into_iter()
+                        .flat_map(|a| a.instance.into_iter())
+                        .collect())
+                }
                 _ => Err(EurekaError::Request(resp.status())),
             },
         }
@@ -245,8 +246,15 @@ impl EurekaRestClient {
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
             Ok(mut resp) => match resp.status() {
-                StatusCode::Ok => Ok(resp.json()
-                    .map_err(|e| EurekaError::ParseError(e.to_string()))?),
+                StatusCode::Ok => {
+                    let apps: AllApplications = resp.json()
+                        .map_err(|e| EurekaError::ParseError(e.to_string()))?;
+                    Ok(apps.applications
+                        .application
+                        .into_iter()
+                        .flat_map(|a| a.instance.into_iter())
+                        .collect())
+                }
                 _ => Err(EurekaError::Request(resp.status())),
             },
         }

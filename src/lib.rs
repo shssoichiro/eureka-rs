@@ -146,7 +146,7 @@ impl EurekaClient {
         })
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&self) {
         self.registry.start();
         if let Some(ref instance) = self.instance {
             instance.start();
