@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Error as FmtError, Formatter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterData {
@@ -51,6 +52,12 @@ pub enum DcNameType {
     Amazon,
 }
 
+impl Display for DcNameType {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum StatusType {
@@ -59,6 +66,12 @@ pub enum StatusType {
     STARTING,
     OUT_OF_SERVICE,
     UNKNOWN,
+}
+
+impl Display for StatusType {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

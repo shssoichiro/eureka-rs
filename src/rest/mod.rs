@@ -23,7 +23,7 @@ impl EurekaRestClient {
     pub fn register(&self, app_id: &str, data: &RegisterData) -> Result<(), EurekaError> {
         let resp = self.client
             .post(&format!(
-                "{}/eureka/v2/apps/{}",
+                "{}/eureka/apps/{}",
                 self.base_url,
                 path_segment_encode(app_id)
             ))
@@ -42,7 +42,7 @@ impl EurekaRestClient {
     pub fn deregister(&self, app_id: &str, instance_id: &str) -> Result<(), EurekaError> {
         let resp = self.client
             .delete(&format!(
-                "{}/eureka/v2/apps/{}/{}",
+                "{}/eureka/apps/{}/{}",
                 self.base_url,
                 path_segment_encode(app_id),
                 path_segment_encode(instance_id)
@@ -61,7 +61,7 @@ impl EurekaRestClient {
     pub fn send_heartbeat(&self, app_id: &str, instance_id: &str) -> Result<(), EurekaError> {
         let resp = self.client
             .delete(&format!(
-                "{}/eureka/v2/apps/{}/{}",
+                "{}/eureka/apps/{}/{}",
                 self.base_url,
                 path_segment_encode(app_id),
                 path_segment_encode(instance_id)
@@ -82,7 +82,7 @@ impl EurekaRestClient {
     /// Query for all instances
     pub fn get_all_instances(&self) -> Result<Vec<Instance>, EurekaError> {
         let resp = self.client
-            .get(&format!("{}/eureka/v2/apps", self.base_url))
+            .get(&format!("{}/eureka/apps", self.base_url))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -98,7 +98,7 @@ impl EurekaRestClient {
     pub fn get_instances_by_app(&self, app_id: &str) -> Result<Vec<Instance>, EurekaError> {
         let resp = self.client
             .get(&format!(
-                "{}/eureka/v2/apps/{}",
+                "{}/eureka/apps/{}",
                 self.base_url,
                 path_segment_encode(app_id)
             ))
@@ -121,7 +121,7 @@ impl EurekaRestClient {
     ) -> Result<Instance, EurekaError> {
         let resp = self.client
             .get(&format!(
-                "{}/eureka/v2/apps/{}/{}",
+                "{}/eureka/apps/{}/{}",
                 self.base_url,
                 path_segment_encode(app_id),
                 path_segment_encode(instance_id)
@@ -141,7 +141,7 @@ impl EurekaRestClient {
     pub fn get_instance(&self, instance_id: &str) -> Result<Instance, EurekaError> {
         let resp = self.client
             .get(&format!(
-                "{}/eureka/v2/apps/{}",
+                "{}/eureka/apps/{}",
                 self.base_url,
                 path_segment_encode(instance_id)
             ))
@@ -156,33 +156,20 @@ impl EurekaRestClient {
         }
     }
 
-    /// Take instance out of service
-    pub fn remove_from_service(&self, app_id: &str, instance_id: &str) -> Result<(), EurekaError> {
+    /// Update instance status
+    pub fn update_status(
+        &self,
+        app_id: &str,
+        instance_id: &str,
+        new_status: &StatusType,
+    ) -> Result<(), EurekaError> {
         let resp = self.client
             .put(&format!(
-                "{}/eureka/v2/apps/{}/{}/status?value=OUT_OF_SERVICE",
+                "{}/eureka/apps/{}/{}/status?value={}",
                 self.base_url,
                 path_segment_encode(app_id),
-                path_segment_encode(instance_id)
-            ))
-            .send();
-        match resp {
-            Err(e) => Err(EurekaError::Network(e)),
-            Ok(resp) => match resp.status() {
-                StatusCode::Ok => Ok(()),
-                _ => Err(EurekaError::Request(resp.status())),
-            },
-        }
-    }
-
-    /// Put instance back into service (remove override)
-    pub fn reenable_service(&self, app_id: &str, instance_id: &str) -> Result<(), EurekaError> {
-        let resp = self.client
-            .delete(&format!(
-                "{}/eureka/v2/apps/{}/{}/status?value=UP",
-                self.base_url,
-                path_segment_encode(app_id),
-                path_segment_encode(instance_id)
+                path_segment_encode(instance_id),
+                new_status
             ))
             .send();
         match resp {
@@ -204,7 +191,7 @@ impl EurekaRestClient {
     ) -> Result<(), EurekaError> {
         let resp = self.client
             .put(&format!(
-                "{}/eureka/v2/apps/{}/{}/metadata?{}={}",
+                "{}/eureka/apps/{}/{}/metadata?{}={}",
                 self.base_url,
                 path_segment_encode(app_id),
                 path_segment_encode(instance_id),
@@ -228,7 +215,7 @@ impl EurekaRestClient {
     ) -> Result<Vec<Instance>, EurekaError> {
         let resp = self.client
             .get(&format!(
-                "{}/eureka/v2/vips/{}",
+                "{}/eureka/vips/{}",
                 self.base_url,
                 path_segment_encode(vip_address)
             ))
@@ -250,7 +237,7 @@ impl EurekaRestClient {
     ) -> Result<Vec<Instance>, EurekaError> {
         let resp = self.client
             .get(&format!(
-                "{}/eureka/v2/svips/{}",
+                "{}/eureka/svips/{}",
                 self.base_url,
                 path_segment_encode(svip_address)
             ))

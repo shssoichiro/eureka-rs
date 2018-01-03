@@ -1,6 +1,7 @@
 #![cfg_attr(feature = "clippy", feature(plugin))]
 #![cfg_attr(feature = "clippy", plugin(clippy))]
 
+extern crate itertools;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -15,6 +16,8 @@ extern crate serde_json;
 extern crate serde_yaml;
 
 mod aws;
+mod instance;
+mod registry;
 mod rest;
 mod resolver;
 
@@ -22,9 +25,13 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 
-use reqwest::{StatusCode, Error as ReqwestError};
+use reqwest::{Error as ReqwestError, Method, Response, StatusCode};
 use serde_json::{Map, Number, Value};
 use serde_yaml::Value as YamlValue;
+
+use self::instance::InstanceClient;
+use self::registry::RegistryClient;
+use self::rest::EurekaRestClient;
 
 lazy_static! {
     static ref DEFAULT_CONFIG: HashMap<String, Value> = {
@@ -69,6 +76,125 @@ quick_error! {
         }
         FileNotFound {}
         ParseError(description: String) {}
+    }
+}
+
+#[derive(Debug)]
+pub struct EurekaClient {
+    config: HashMap<String, Value>,
+    client: EurekaRestClient,
+    registry: RegistryClient,
+    instance: Option<InstanceClient>,
+}
+
+impl EurekaClient {
+    pub fn new(env: &str, mut config: HashMap<String, Value>) -> Result<Self, EurekaError> {
+        let filename = config
+            .get(&String::from("filename"))
+            .and_then(|filename| filename.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| "eureka-client".into());
+        let default_yaml = match load_yaml(format!("{}.yml", filename)) {
+            Ok(yaml) => yaml,
+            Err(EurekaError::FileNotFound) => HashMap::new(),
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        let env_yaml = match load_yaml(format!("{}-{}.yml", filename, env)) {
+            Ok(yaml) => yaml,
+            Err(EurekaError::FileNotFound) => HashMap::new(),
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        for (key, prop) in env_yaml
+            .into_iter()
+            .chain(default_yaml.into_iter())
+            .chain((*DEFAULT_CONFIG).clone().into_iter())
+        {
+            config.entry(key).or_insert(prop);
+        }
+        Self::validate_config(&config)?;
+
+        let base_url = {
+            let eureka_cfg = config["eureka"].as_object().unwrap();
+            let ssl = eureka_cfg["ssl"].as_bool().unwrap_or(false);
+            let protocol = if ssl { "https" } else { "http" };
+            let host = eureka_cfg["host"].as_str().unwrap();
+            let port = eureka_cfg["port"].as_u64().unwrap();
+            let service_path = eureka_cfg["servicePath"].as_str().unwrap();
+            format!("{}://{}:{}{}", protocol, host, port, service_path)
+        };
+        Ok(EurekaClient {
+            client: EurekaRestClient::new(base_url.clone()),
+            registry: RegistryClient::new(base_url.clone()),
+            instance: if config["eureka"]
+                .get("registerWithEureka")
+                .and_then(|reg| reg.as_bool())
+                .unwrap_or(false)
+            {
+                Some(InstanceClient::new(
+                    base_url,
+                    serde_json::from_value(config["instance"].clone())
+                        .map_err(|e| EurekaError::ParseError(e.to_string()))?,
+                ))
+            } else {
+                None
+            },
+            config,
+        })
+    }
+
+    pub fn start(&mut self) {
+        self.registry.start();
+        if let Some(ref instance) = self.instance {
+            instance.start();
+        }
+    }
+
+    pub fn make_request<V: Into<Value>>(
+        &self,
+        app: &str,
+        path: &str,
+        method: &Method,
+        body: &V,
+    ) -> Result<Response, EurekaError> {
+        unimplemented!()
+    }
+
+    fn validate_config(config: &HashMap<String, Value>) -> Result<(), EurekaError> {
+        let validate = |namespace: &str, key: &str| -> Result<(), EurekaError> {
+            if config
+                .get(namespace)
+                .and_then(|ns| ns.as_object())
+                .map(|ns| ns.contains_key(key))
+                .unwrap_or(false)
+            {
+                return Ok(());
+            };
+            Err(EurekaError::Configuration(format!(
+                "Missing \"{}.{}\" config value.",
+                namespace, key
+            )))
+        };
+
+        validate("eureka", "host")?;
+        validate("eureka", "port")?;
+        validate("eureka", "servicePath")?;
+        if config
+            .get("eureka")
+            .and_then(|eureka| eureka.get("registerWithEureka"))
+            .and_then(|val| val.as_bool())
+            .unwrap_or(false)
+        {
+            validate("instance", "app")?;
+            validate("instance", "vipAddress")?;
+            validate("instance", "port")?;
+            validate("instance", "dataCenterInfo")?;
+        }
+
+        Ok(())
     }
 }
 
