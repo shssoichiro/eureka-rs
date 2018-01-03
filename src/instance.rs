@@ -54,8 +54,10 @@ impl InstanceClient {
             }
         });
 
-        while let Err(e) = self.client
-            .update_status(&self.config.app, &self.config.host_name, &StatusType::Up) {
+        while let Err(e) =
+            self.client
+                .update_status(&self.config.app, &self.config.host_name, &StatusType::Up)
+        {
             error!("Failed to set app to UP: {}", e);
             thread::sleep(Duration::from_secs(15));
         }

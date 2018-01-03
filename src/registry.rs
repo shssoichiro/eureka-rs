@@ -13,7 +13,6 @@ use rest::structures::Instance;
 pub struct RegistryClient {
     client: Arc<EurekaRestClient>,
     app_cache: Arc<RwLock<HashMap<String, Vec<Instance>>>>,
-    vip_cache: Arc<RwLock<HashMap<String, Vec<Instance>>>>,
     is_running: Arc<AtomicBool>,
 }
 
@@ -22,7 +21,6 @@ impl RegistryClient {
         RegistryClient {
             client: Arc::new(EurekaRestClient::new(base_url)),
             app_cache: Arc::new(RwLock::new(HashMap::new())),
-            vip_cache: Arc::new(RwLock::new(HashMap::new())),
             is_running: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -33,14 +31,12 @@ impl RegistryClient {
         let is_running = Arc::clone(&self.is_running);
         let client = Arc::clone(&self.client);
         let app_cache = Arc::clone(&self.app_cache);
-        let vip_cache = Arc::clone(&self.vip_cache);
         thread::spawn(move || {
             while is_running.load(Ordering::Relaxed) {
                 let resp = client.get_all_instances();
                 match resp {
                     Ok(instances) => {
-                        *app_cache.write().unwrap() = group_instances_by_app(instances.clone());
-                        *vip_cache.write().unwrap() = group_instances_by_vip(instances);
+                        *app_cache.write().unwrap() = group_instances_by_app(instances);
                     }
                     Err(e) => {
                         error!("Failed to fetch registry: {}", e);
@@ -49,6 +45,16 @@ impl RegistryClient {
                 thread::sleep(Duration::from_secs(30));
             }
         });
+    }
+
+    pub fn get_instance_by_app_name(&self, app: &str) -> Option<Instance> {
+        // Clone the result to avoid holding onto a lock on the app cache indefinitely
+        self.app_cache
+            .read()
+            .unwrap()
+            .get(app)
+            .and_then(|instances| instances.get(0))
+            .cloned()
     }
 }
 
@@ -62,15 +68,6 @@ fn group_instances_by_app(instances: Vec<Instance>) -> HashMap<String, Vec<Insta
     instances
         .into_iter()
         .group_by(|i| i.app.clone())
-        .into_iter()
-        .map(|(k, g)| (k, g.collect()))
-        .collect()
-}
-
-fn group_instances_by_vip(instances: Vec<Instance>) -> HashMap<String, Vec<Instance>> {
-    instances
-        .into_iter()
-        .group_by(|i| i.vip_address.clone())
         .into_iter()
         .map(|(k, g)| (k, g.collect()))
         .collect()

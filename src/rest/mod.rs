@@ -1,6 +1,8 @@
 pub mod structures;
 
 use reqwest::{Client, StatusCode};
+use reqwest::header::{qitem, Accept};
+use reqwest::mime;
 
 use {path_segment_encode, query_encode, EurekaError};
 use self::structures::*;
@@ -27,6 +29,7 @@ impl EurekaRestClient {
                 self.base_url,
                 path_segment_encode(app_id)
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .json(data)
             .send();
         match resp {
@@ -66,6 +69,7 @@ impl EurekaRestClient {
                 path_segment_encode(app_id),
                 path_segment_encode(instance_id)
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -83,6 +87,7 @@ impl EurekaRestClient {
     pub fn get_all_instances(&self) -> Result<Vec<Instance>, EurekaError> {
         let resp = self.client
             .get(&format!("{}/eureka/apps", self.base_url))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -109,6 +114,7 @@ impl EurekaRestClient {
                 self.base_url,
                 path_segment_encode(app_id)
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -136,6 +142,7 @@ impl EurekaRestClient {
                 path_segment_encode(app_id),
                 path_segment_encode(instance_id)
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -165,6 +172,7 @@ impl EurekaRestClient {
                 path_segment_encode(instance_id),
                 new_status
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -192,6 +200,7 @@ impl EurekaRestClient {
                 query_encode(key),
                 query_encode(value)
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -213,6 +222,7 @@ impl EurekaRestClient {
                 self.base_url,
                 path_segment_encode(vip_address)
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -242,6 +252,7 @@ impl EurekaRestClient {
                 self.base_url,
                 path_segment_encode(svip_address)
             ))
+            .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),

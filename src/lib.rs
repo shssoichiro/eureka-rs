@@ -10,6 +10,7 @@ extern crate percent_encoding;
 #[macro_use]
 extern crate quick_error;
 extern crate reqwest;
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
@@ -25,13 +26,15 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 
-use reqwest::{Error as ReqwestError, Method, Response, StatusCode};
+use reqwest::{Client as ReqwestClient, Error as ReqwestError, Method, Response, StatusCode};
+use reqwest::header::{qitem, Accept};
+use reqwest::mime;
+use serde::Serialize;
 use serde_json::{Map, Number, Value};
 use serde_yaml::Value as YamlValue;
 
 use self::instance::InstanceClient;
 use self::registry::RegistryClient;
-use self::rest::EurekaRestClient;
 
 lazy_static! {
     static ref DEFAULT_CONFIG: HashMap<String, Value> = {
@@ -81,8 +84,9 @@ quick_error! {
 
 #[derive(Debug)]
 pub struct EurekaClient {
+    base_url: String,
     config: HashMap<String, Value>,
-    client: EurekaRestClient,
+    client: ReqwestClient,
     registry: RegistryClient,
     instance: Option<InstanceClient>,
 }
@@ -127,7 +131,8 @@ impl EurekaClient {
             format!("{}://{}:{}{}", protocol, host, port, service_path)
         };
         Ok(EurekaClient {
-            client: EurekaRestClient::new(base_url.clone()),
+            base_url: base_url.clone(),
+            client: ReqwestClient::new(),
             registry: RegistryClient::new(base_url.clone()),
             instance: if config["eureka"]
                 .get("registerWithEureka")
@@ -153,14 +158,44 @@ impl EurekaClient {
         }
     }
 
-    pub fn make_request<V: Into<Value>>(
+    pub fn make_request<V: Serialize>(
         &self,
         app: &str,
         path: &str,
-        method: &Method,
+        method: Method,
         body: &V,
     ) -> Result<Response, EurekaError> {
-        unimplemented!()
+        let instance = self.registry.get_instance_by_app_name(app);
+        if let Some(instance) = instance {
+            let ssl = self.config["ssl"].as_bool().unwrap_or(false);
+            let protocol = if ssl { "https" } else { "http" };
+            let host = instance.ip_addr;
+            let port = if ssl && instance.secure_port.value().is_some() {
+                instance.secure_port.value().unwrap()
+            } else {
+                instance.port.and_then(|port| port.value()).unwrap_or(8080)
+            };
+            self.client
+                .request(
+                    method,
+                    &format!(
+                        "{}://{}:{}/{}",
+                        protocol,
+                        host,
+                        port,
+                        path.trim_left_matches('/')
+                    ),
+                )
+                .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
+                .json(body)
+                .send()
+                .map_err(EurekaError::Network)
+        } else {
+            Err(EurekaError::UnexpectedState(format!(
+                "Could not find app {}",
+                app
+            )))
+        }
     }
 
     fn validate_config(config: &HashMap<String, Value>) -> Result<(), EurekaError> {
