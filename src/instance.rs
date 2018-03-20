@@ -30,6 +30,7 @@ impl InstanceClient {
             error!("Failed to register app: {}", e);
             thread::sleep(Duration::from_secs(15));
         }
+        debug!("Registered app with eureka");
 
         self.is_running.store(true, Ordering::Relaxed);
 
@@ -48,7 +49,9 @@ impl InstanceClient {
                     Err(e) => {
                         error!("Failed to send heartbeat: {}", e);
                     }
-                    Ok(_) => {}
+                    Ok(_) => {
+                        debug!("Sent heartbeat successfully");
+                    }
                 }
                 thread::sleep(Duration::from_secs(30));
             }

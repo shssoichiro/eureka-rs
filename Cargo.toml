@@ -4,17 +4,11 @@ name = "eureka"
 version = "0.1.0"
 
 [dependencies]
-lazy_static = "1.0.0"
 log = "0.4.0"
 quick-error = "1.1.0"
 reqwest = "0.8.0"
 serde = "1.0.0"
 serde_derive = "1.0.0"
 serde_json = "1.0.0"
-serde_yaml = "0.7.0"
 percent-encoding = "1.0.1"
 itertools = "0.7.4"
-
-[dependencies.clippy]
-optional = true
-version = "*"

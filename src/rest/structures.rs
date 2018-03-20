@@ -4,15 +4,17 @@ use std::fmt::{Display, Error as FmtError, Formatter};
 use serde_json;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegisterData {
     pub instance: Instance,
-    #[serde(rename = "dataCenterInfo")] pub data_center_info: DataCenterInfo,
-    #[serde(rename = "leaseInfo")] pub lease_info: Option<LeaseInfo>,
-    #[serde(rename = "dcNameType")] pub dc_name_type: DcNameType,
-    #[serde(rename = "statusType")] pub status_type: StatusType,
+    pub data_center_info: DataCenterInfo,
+    pub lease_info: Option<LeaseInfo>,
+    pub dc_name_type: DcNameType,
+    pub status_type: StatusType,
     // This is a typo on Eureka's side
-    #[serde(rename = "amazonMetdataType")] pub amazon_metadata_type: Option<AmazonMetadataType>,
-    #[serde(rename = "appMetadataType")] pub app_metadata_type: HashMap<String, String>,
+    #[serde(rename = "amazonMetdataType")]
+    pub amazon_metadata_type: Option<AmazonMetadataType>,
+    pub app_metadata_type: HashMap<String, String>,
 }
 
 impl From<Instance> for RegisterData {
@@ -30,30 +32,32 @@ impl From<Instance> for RegisterData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Instance {
     /// This doubles as the instance ID, because why not Eureka?
-    #[serde(rename = "hostName")]
     pub host_name: String,
     pub app: String,
-    #[serde(rename = "ipAddr")] pub ip_addr: String,
-    #[serde(rename = "vipAddress")] pub vip_address: String,
-    #[serde(rename = "secureVipAddress")] pub secure_vip_address: String,
+    pub ip_addr: String,
+    pub vip_address: String,
+    pub secure_vip_address: String,
     pub status: StatusType,
     pub port: Option<PortData>,
-    #[serde(rename = "securePort")] pub secure_port: PortData,
-    #[serde(rename = "homePageUrl")] pub home_page_url: String,
-    #[serde(rename = "statusPageUrl")] pub status_page_url: String,
-    #[serde(rename = "healthCheckUrl")] pub health_check_url: String,
-    #[serde(rename = "dataCenterInfo")] pub data_center_info: DataCenterInfo,
-    #[serde(rename = "leaseInfo")] pub lease_info: Option<LeaseInfo>,
+    pub secure_port: PortData,
+    pub home_page_url: String,
+    pub status_page_url: String,
+    pub health_check_url: String,
+    pub data_center_info: DataCenterInfo,
+    pub lease_info: Option<LeaseInfo>,
     /// optional app specific metadata
     pub metadata: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortData {
-    #[serde(rename = "$")] value: u16,
-    #[serde(rename = "@enabled")] enabled: String,
+    #[serde(rename = "$")]
+    value: u16,
+    #[serde(rename = "@enabled")]
+    enabled: String,
 }
 
 impl PortData {
@@ -100,9 +104,9 @@ pub struct DataCenterInfo {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LeaseInfo {
     /// (optional) if you want to change the length of lease - default if 90 secs
-    #[serde(rename = "evictionDurationInSecs")]
     pub eviction_duration_in_secs: Option<usize>,
 }
 
@@ -139,16 +143,17 @@ impl Display for StatusType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct AmazonMetadataType {
-    #[serde(rename = "ami-launch-index")] pub ami_launch_index: String,
-    #[serde(rename = "local-hostname")] pub local_hostname: String,
-    #[serde(rename = "availability-zone")] pub availability_zone: String,
-    #[serde(rename = "instance-id")] pub instance_id: String,
-    #[serde(rename = "public-ipv4")] pub public_ipv4: String,
-    #[serde(rename = "public-hostname")] pub public_hostname: String,
-    #[serde(rename = "ami-manifest-path")] pub ami_manifest_path: String,
-    #[serde(rename = "local-ipv4")] pub local_ipv4: String,
-    #[serde(rename = "hostname")] pub hostname: String,
-    #[serde(rename = "ami-id")] pub ami_id: String,
-    #[serde(rename = "instance-type")] pub instance_type: String,
+    pub ami_launch_index: String,
+    pub local_hostname: String,
+    pub availability_zone: String,
+    pub instance_id: String,
+    pub public_ipv4: String,
+    pub public_hostname: String,
+    pub ami_manifest_path: String,
+    pub local_ipv4: String,
+    pub hostname: String,
+    pub ami_id: String,
+    pub instance_type: String,
 }

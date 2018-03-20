@@ -1,9 +1,4 @@
-#![cfg_attr(feature = "clippy", feature(plugin))]
-#![cfg_attr(feature = "clippy", plugin(clippy))]
-
 extern crate itertools;
-#[macro_use]
-extern crate lazy_static;
 #[macro_use]
 extern crate log;
 extern crate percent_encoding;
@@ -14,7 +9,6 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-extern crate serde_yaml;
 
 mod aws;
 mod instance;
@@ -22,43 +16,65 @@ mod registry;
 mod rest;
 mod resolver;
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::path::Path;
-
 use reqwest::{Client as ReqwestClient, Error as ReqwestError, Method, Response, StatusCode};
 use reqwest::header::{qitem, Accept};
 use reqwest::mime;
 use serde::Serialize;
-use serde_json::{Map, Number, Value};
-use serde_yaml::Value as YamlValue;
 
 use self::instance::InstanceClient;
 use self::registry::RegistryClient;
+use rest::structures::Instance;
 
-lazy_static! {
-    static ref DEFAULT_CONFIG: HashMap<String, Value> = {
-        let mut eureka = HashMap::with_capacity(15);
-        eureka.insert(String::from("heartbeatInterval"), Value::Number(Number::from(30_000)));
-        eureka.insert(String::from("registryFetchInterval"), Value::Number(Number::from(30_000)));
-        eureka.insert(String::from("maxRetries"), Value::Number(Number::from(3)));
-        eureka.insert(String::from("requestRetryDelay"), Value::Number(Number::from(500)));
-        eureka.insert(String::from("fetchRegistry"), Value::Bool(true));
-        eureka.insert(String::from("filterUpInstances"), Value::Bool(true));
-        eureka.insert(String::from("servicePath"), Value::String(String::from("/eureka/v2/apps/")));
-        eureka.insert(String::from("ssl"), Value::Bool(false));
-        eureka.insert(String::from("useDns"), Value::Bool(false));
-        eureka.insert(String::from("preferSameZone"), Value::Bool(true));
-        eureka.insert(String::from("clusterRefreshInterval"), Value::Number(Number::from(300_000)));
-        eureka.insert(String::from("fetchMetadata"), Value::Bool(true));
-        eureka.insert(String::from("registerWithEureka"), Value::Bool(true));
-        eureka.insert(String::from("useLocalMetadata"), Value::Bool(false));
-        eureka.insert(String::from("preferIpAddress"), Value::Bool(false));
-        let mut config = HashMap::with_capacity(2);
-        config.insert(String::from("eureka"), Value::Object(eureka.into_iter().collect()));
-        config.insert(String::from("instance"), Value::Object(Map::new()));
-        config
-    };
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EurekaConfig {
+    pub host: String,
+    pub port: u16,
+    pub heartbeat_interval: usize,
+    pub registry_fetch_interval: usize,
+    pub max_retries: usize,
+    pub request_retry_delay: usize,
+    pub fetch_registry: bool,
+    pub filter_up_instances: bool,
+    pub service_path: String,
+    pub ssl: bool,
+    pub use_dns: bool,
+    pub prefer_same_zone: bool,
+    pub cluster_refresh_interval: usize,
+    pub fetch_metadata: bool,
+    pub register_with_eureka: bool,
+    pub use_local_metadata: bool,
+    pub prefer_ip_address: bool,
+}
+
+impl Default for EurekaConfig {
+    fn default() -> Self {
+        EurekaConfig {
+            host: "localhost".to_string(),
+            port: 8761,
+            heartbeat_interval: 30_000,
+            registry_fetch_interval: 30_000,
+            max_retries: 3,
+            request_retry_delay: 500,
+            fetch_registry: true,
+            filter_up_instances: true,
+            service_path: "/eureka/v2/apps/".to_string(),
+            ssl: false,
+            use_dns: false,
+            prefer_same_zone: true,
+            cluster_refresh_interval: 300_000,
+            fetch_metadata: true,
+            register_with_eureka: true,
+            use_local_metadata: false,
+            prefer_ip_address: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BaseConfig {
+    pub eureka: EurekaConfig,
+    pub instance: Option<Instance>,
 }
 
 quick_error! {
@@ -85,64 +101,34 @@ quick_error! {
 #[derive(Debug)]
 pub struct EurekaClient {
     base_url: String,
-    config: HashMap<String, Value>,
+    config: BaseConfig,
     client: ReqwestClient,
     registry: RegistryClient,
     instance: Option<InstanceClient>,
 }
 
 impl EurekaClient {
-    pub fn new(env: &str, mut config: HashMap<String, Value>) -> Result<Self, EurekaError> {
-        let filename = config
-            .get(&String::from("filename"))
-            .and_then(|filename| filename.as_str())
-            .map(String::from)
-            .unwrap_or_else(|| "eureka-client".into());
-        let default_yaml = match load_yaml(format!("{}.yml", filename)) {
-            Ok(yaml) => yaml,
-            Err(EurekaError::FileNotFound) => HashMap::new(),
-            Err(e) => {
-                return Err(e);
-            }
-        };
-        let env_yaml = match load_yaml(format!("{}-{}.yml", filename, env)) {
-            Ok(yaml) => yaml,
-            Err(EurekaError::FileNotFound) => HashMap::new(),
-            Err(e) => {
-                return Err(e);
-            }
-        };
-        for (key, prop) in env_yaml
-            .into_iter()
-            .chain(default_yaml.into_iter())
-            .chain((*DEFAULT_CONFIG).clone().into_iter())
-        {
-            config.entry(key).or_insert(prop);
-        }
+    pub fn new(env: &str, mut config: BaseConfig) -> Result<Self, EurekaError> {
         Self::validate_config(&config)?;
-
         let base_url = {
-            let eureka_cfg = config["eureka"].as_object().unwrap();
-            let ssl = eureka_cfg["ssl"].as_bool().unwrap_or(false);
+            let ssl = config.eureka.ssl;
             let protocol = if ssl { "https" } else { "http" };
-            let host = eureka_cfg["host"].as_str().unwrap();
-            let port = eureka_cfg["port"].as_u64().unwrap();
-            let service_path = eureka_cfg["servicePath"].as_str().unwrap();
+            let host = config.eureka.host;
+            let port = config.eureka.port;
+            let service_path = config.eureka.service_path;
             format!("{}://{}:{}{}", protocol, host, port, service_path)
         };
         Ok(EurekaClient {
             base_url: base_url.clone(),
             client: ReqwestClient::new(),
             registry: RegistryClient::new(base_url.clone()),
-            instance: if config["eureka"]
-                .get("registerWithEureka")
-                .and_then(|reg| reg.as_bool())
-                .unwrap_or(false)
-            {
+            instance: if config.eureka.register_with_eureka {
                 Some(InstanceClient::new(
                     base_url,
-                    serde_json::from_value(config["instance"].clone())
-                        .map_err(|e| EurekaError::ParseError(e.to_string()))?,
+                    config
+                        .instance
+                        .clone()
+                        .expect("Validation ensures this is set"),
                 ))
             } else {
                 None
@@ -167,7 +153,7 @@ impl EurekaClient {
     ) -> Result<Response, EurekaError> {
         let instance = self.registry.get_instance_by_app_name(app);
         if let Some(instance) = instance {
-            let ssl = self.config["ssl"].as_bool().unwrap_or(false);
+            let ssl = self.config.eureka.ssl;
             let protocol = if ssl { "https" } else { "http" };
             let host = instance.ip_addr;
             let port = if ssl && instance.secure_port.value().is_some() {
@@ -198,73 +184,15 @@ impl EurekaClient {
         }
     }
 
-    fn validate_config(config: &HashMap<String, Value>) -> Result<(), EurekaError> {
-        let validate = |namespace: &str, key: &str| -> Result<(), EurekaError> {
-            if config
-                .get(namespace)
-                .and_then(|ns| ns.as_object())
-                .map(|ns| ns.contains_key(key))
-                .unwrap_or(false)
-            {
-                return Ok(());
-            };
-            Err(EurekaError::Configuration(format!(
-                "Missing \"{}.{}\" config value.",
-                namespace, key
-            )))
-        };
-
-        validate("eureka", "host")?;
-        validate("eureka", "port")?;
-        validate("eureka", "servicePath")?;
-        if config
-            .get("eureka")
-            .and_then(|eureka| eureka.get("registerWithEureka"))
-            .and_then(|val| val.as_bool())
-            .unwrap_or(false)
-        {
-            validate("instance", "app")?;
-            validate("instance", "vipAddress")?;
-            validate("instance", "port")?;
-            validate("instance", "dataCenterInfo")?;
+    fn validate_config(config: &BaseConfig) -> Result<(), EurekaError> {
+        if config.eureka.register_with_eureka && config.instance.is_none() {
+            Err(EurekaError::Configuration(
+                "Instance configuration is missing but register_with_eureka is set to true"
+                    .to_string(),
+            ))
+        } else {
+            Ok(())
         }
-
-        Ok(())
-    }
-}
-
-fn load_yaml<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Value>, EurekaError> {
-    Ok(
-        serde_yaml::from_reader(File::open(path).map_err(|_| EurekaError::FileNotFound)?)
-            .map_err(|e| EurekaError::ParseError(e.to_string()))?,
-    )
-}
-
-/// Maps in `serde_yaml` are more annoying to work with than in `serde_json` because they have
-/// `Value` keys instead of `String` keys, so we're going to consistently use `serde_json`
-/// throughout the library
-fn map_yaml_to_json(yaml: YamlValue) -> Value {
-    match yaml {
-        YamlValue::Null => Value::Null,
-        YamlValue::Bool(bool) => Value::Bool(bool),
-        YamlValue::Number(ref number) if number.is_u64() => {
-            Value::Number(Number::from(number.as_u64().unwrap()))
-        }
-        YamlValue::Number(ref number) if number.is_i64() => {
-            Value::Number(Number::from(number.as_i64().unwrap()))
-        }
-        YamlValue::Number(ref number) if number.is_f64() => Value::Number(
-            Number::from_f64(number.as_f64().unwrap())
-                .unwrap_or_else(|| Number::from_f64(0.0).unwrap()),
-        ),
-        YamlValue::Number(_) => unreachable!(),
-        YamlValue::String(str) => Value::String(str),
-        YamlValue::Sequence(seq) => Value::Array(seq.into_iter().map(map_yaml_to_json).collect()),
-        YamlValue::Mapping(map) => Value::Object(
-            map.into_iter()
-                .map(|(k, v)| (k.as_str().unwrap().to_string(), map_yaml_to_json(v)))
-                .collect(),
-        ),
     }
 }
 
