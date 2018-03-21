@@ -10,20 +10,19 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 
+use reqwest::{Client as ReqwestClient, Error as ReqwestError, Method, Response, StatusCode};
+use reqwest::header::{qitem, Accept};
+use reqwest::mime;
+pub use self::instance::{Instance, PortData, StatusType};
+use self::instance::InstanceClient;
+use self::registry::RegistryClient;
+use serde::Serialize;
+
 mod aws;
 mod instance;
 mod registry;
 mod rest;
 mod resolver;
-
-use reqwest::{Client as ReqwestClient, Error as ReqwestError, Method, Response, StatusCode};
-use reqwest::header::{qitem, Accept};
-use reqwest::mime;
-use serde::Serialize;
-
-use self::instance::InstanceClient;
-use self::registry::RegistryClient;
-use rest::structures::Instance;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,7 +57,7 @@ impl Default for EurekaConfig {
             request_retry_delay: 500,
             fetch_registry: true,
             filter_up_instances: true,
-            service_path: "/eureka/v2/apps/".to_string(),
+            service_path: "/eureka".to_string(),
             ssl: false,
             use_dns: false,
             prefer_same_zone: true,
@@ -74,7 +73,7 @@ impl Default for EurekaConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BaseConfig {
     pub eureka: EurekaConfig,
-    pub instance: Option<Instance>,
+    pub instance: Instance,
 }
 
 quick_error! {
@@ -90,10 +89,6 @@ quick_error! {
         UnexpectedState(description: String) {
             description(description)
         }
-        Configuration(description: String) {
-            description(description)
-        }
-        FileNotFound {}
         ParseError(description: String) {}
     }
 }
@@ -108,33 +103,26 @@ pub struct EurekaClient {
 }
 
 impl EurekaClient {
-    pub fn new(env: &str, mut config: BaseConfig) -> Result<Self, EurekaError> {
-        Self::validate_config(&config)?;
+    pub fn new(config: BaseConfig) -> Self {
         let base_url = {
             let ssl = config.eureka.ssl;
             let protocol = if ssl { "https" } else { "http" };
-            let host = config.eureka.host;
+            let host = &config.eureka.host;
             let port = config.eureka.port;
-            let service_path = config.eureka.service_path;
+            let service_path = &config.eureka.service_path;
             format!("{}://{}:{}{}", protocol, host, port, service_path)
         };
-        Ok(EurekaClient {
+        EurekaClient {
             base_url: base_url.clone(),
             client: ReqwestClient::new(),
             registry: RegistryClient::new(base_url.clone()),
             instance: if config.eureka.register_with_eureka {
-                Some(InstanceClient::new(
-                    base_url,
-                    config
-                        .instance
-                        .clone()
-                        .expect("Validation ensures this is set"),
-                ))
+                Some(InstanceClient::new(base_url, config.instance.clone()))
             } else {
                 None
             },
             config,
-        })
+        }
     }
 
     pub fn start(&self) {
@@ -181,17 +169,6 @@ impl EurekaClient {
                 "Could not find app {}",
                 app
             )))
-        }
-    }
-
-    fn validate_config(config: &BaseConfig) -> Result<(), EurekaError> {
-        if config.eureka.register_with_eureka && config.instance.is_none() {
-            Err(EurekaError::Configuration(
-                "Instance configuration is missing but register_with_eureka is set to true"
-                    .to_string(),
-            ))
-        } else {
-            Ok(())
         }
     }
 }

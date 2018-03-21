@@ -1,7 +1,8 @@
 [package]
 authors = ["Josh Holmer <jholmer.in@gmail.com>"]
 name = "eureka"
-version = "0.1.0"
+description = "Handles HTTP requests to and optionally registering a service with Eureka"
+version = "0.0.1"
 
 [dependencies]
 log = "0.4.0"

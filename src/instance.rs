@@ -1,11 +1,10 @@
+use EurekaError;
+use rest::EurekaRestClient;
+pub use rest::structures::{Instance, PortData, StatusType};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-
-use EurekaError;
-use rest::EurekaRestClient;
-use rest::structures::{Instance, StatusType};
 
 #[derive(Debug)]
 pub struct InstanceClient {
@@ -24,9 +23,7 @@ impl InstanceClient {
     }
 
     pub fn start(&self) {
-        while let Err(e) = self.client
-            .register(&self.config.app, &(*self.config).clone().into())
-        {
+        while let Err(e) = self.client.register(&self.config.app, &*self.config) {
             error!("Failed to register app: {}", e);
             thread::sleep(Duration::from_secs(15));
         }
@@ -44,7 +41,7 @@ impl InstanceClient {
                 match resp {
                     Err(EurekaError::UnexpectedState(_)) => {
                         warn!("App not registered with eureka, reregistering");
-                        let _ = client.register(&config.app, &(*config).clone().into());
+                        let _ = client.register(&config.app, &*config);
                     }
                     Err(e) => {
                         error!("Failed to send heartbeat: {}", e);

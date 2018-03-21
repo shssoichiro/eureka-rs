@@ -22,15 +22,13 @@ impl EurekaRestClient {
     }
 
     /// Register new application instance
-    pub fn register(&self, app_id: &str, data: &RegisterData) -> Result<(), EurekaError> {
+    pub fn register(&self, app_id: &str, data: &Instance) -> Result<(), EurekaError> {
+        let url = format!("{}/apps/{}", self.base_url, path_segment_encode(app_id));
+        debug!("Sending register request to {}", url);
         let resp = self.client
-            .post(&format!(
-                "{}/eureka/apps/{}",
-                self.base_url,
-                path_segment_encode(app_id)
-            ))
+            .post(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
-            .json(data)
+            .json(&Register { instance: data })
             .send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
@@ -43,14 +41,14 @@ impl EurekaRestClient {
 
     /// De-register application instance
     pub fn deregister(&self, app_id: &str, instance_id: &str) -> Result<(), EurekaError> {
-        let resp = self.client
-            .delete(&format!(
-                "{}/eureka/apps/{}/{}",
-                self.base_url,
-                path_segment_encode(app_id),
-                path_segment_encode(instance_id)
-            ))
-            .send();
+        let url = format!(
+            "{}/apps/{}/{}",
+            self.base_url,
+            path_segment_encode(app_id),
+            path_segment_encode(instance_id)
+        );
+        debug!("Sending deregister request to {}", url);
+        let resp = self.client.delete(&url).send();
         match resp {
             Err(e) => Err(EurekaError::Network(e)),
             Ok(resp) => match resp.status() {
@@ -62,13 +60,15 @@ impl EurekaRestClient {
 
     /// Send application instance heartbeat
     pub fn send_heartbeat(&self, app_id: &str, instance_id: &str) -> Result<(), EurekaError> {
+        let url = format!(
+            "{}/apps/{}/{}",
+            self.base_url,
+            path_segment_encode(app_id),
+            path_segment_encode(instance_id)
+        );
+        debug!("Sending heartbeat request to {}", url);
         let resp = self.client
-            .delete(&format!(
-                "{}/eureka/apps/{}/{}",
-                self.base_url,
-                path_segment_encode(app_id),
-                path_segment_encode(instance_id)
-            ))
+            .put(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
@@ -85,8 +85,10 @@ impl EurekaRestClient {
 
     /// Query for all instances
     pub fn get_all_instances(&self) -> Result<Vec<Instance>, EurekaError> {
+        let url = format!("{}/apps", self.base_url);
+        debug!("Sending get all instances request to {}", url);
         let resp = self.client
-            .get(&format!("{}/eureka/apps", self.base_url))
+            .get(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
@@ -108,12 +110,10 @@ impl EurekaRestClient {
 
     /// Query for all `app_id` instances
     pub fn get_instances_by_app(&self, app_id: &str) -> Result<Vec<Instance>, EurekaError> {
+        let url = format!("{}/apps/{}", self.base_url, path_segment_encode(app_id));
+        debug!("Sending get instances by app request to {}", url);
         let resp = self.client
-            .get(&format!(
-                "{}/eureka/apps/{}",
-                self.base_url,
-                path_segment_encode(app_id)
-            ))
+            .get(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
@@ -135,13 +135,18 @@ impl EurekaRestClient {
         app_id: &str,
         instance_id: &str,
     ) -> Result<Instance, EurekaError> {
+        let url = format!(
+            "{}/apps/{}/{}",
+            self.base_url,
+            path_segment_encode(app_id),
+            path_segment_encode(instance_id)
+        );
+        debug!(
+            "Sending get instance by app and instance request to {}",
+            url
+        );
         let resp = self.client
-            .get(&format!(
-                "{}/eureka/apps/{}/{}",
-                self.base_url,
-                path_segment_encode(app_id),
-                path_segment_encode(instance_id)
-            ))
+            .get(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
@@ -164,14 +169,16 @@ impl EurekaRestClient {
         instance_id: &str,
         new_status: &StatusType,
     ) -> Result<(), EurekaError> {
+        let url = format!(
+            "{}/apps/{}/{}/status?value={}",
+            self.base_url,
+            path_segment_encode(app_id),
+            path_segment_encode(instance_id),
+            new_status
+        );
+        debug!("Sending update status request to {}", url);
         let resp = self.client
-            .put(&format!(
-                "{}/eureka/apps/{}/{}/status?value={}",
-                self.base_url,
-                path_segment_encode(app_id),
-                path_segment_encode(instance_id),
-                new_status
-            ))
+            .put(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
@@ -191,15 +198,17 @@ impl EurekaRestClient {
         key: &str,
         value: &str,
     ) -> Result<(), EurekaError> {
+        let url = format!(
+            "{}/apps/{}/{}/metadata?{}={}",
+            self.base_url,
+            path_segment_encode(app_id),
+            path_segment_encode(instance_id),
+            query_encode(key),
+            query_encode(value)
+        );
+        debug!("Sending update metadata request to {}", url);
         let resp = self.client
-            .put(&format!(
-                "{}/eureka/apps/{}/{}/metadata?{}={}",
-                self.base_url,
-                path_segment_encode(app_id),
-                path_segment_encode(instance_id),
-                query_encode(key),
-                query_encode(value)
-            ))
+            .put(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
@@ -216,12 +225,14 @@ impl EurekaRestClient {
         &self,
         vip_address: &str,
     ) -> Result<Vec<Instance>, EurekaError> {
+        let url = format!(
+            "{}/vips/{}",
+            self.base_url,
+            path_segment_encode(vip_address)
+        );
+        debug!("Sending get instances by vip address request to {}", url);
         let resp = self.client
-            .get(&format!(
-                "{}/eureka/vips/{}",
-                self.base_url,
-                path_segment_encode(vip_address)
-            ))
+            .get(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {
@@ -246,12 +257,14 @@ impl EurekaRestClient {
         &self,
         svip_address: &str,
     ) -> Result<Vec<Instance>, EurekaError> {
+        let url = format!(
+            "{}/svips/{}",
+            self.base_url,
+            path_segment_encode(svip_address)
+        );
+        debug!("Sending get instances by svip address request to {}", url);
         let resp = self.client
-            .get(&format!(
-                "{}/eureka/svips/{}",
-                self.base_url,
-                path_segment_encode(svip_address)
-            ))
+            .get(&url)
             .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
             .send();
         match resp {

@@ -1,40 +1,17 @@
+use serde_json;
 use std::collections::HashMap;
+use std::env;
 use std::fmt::{Display, Error as FmtError, Formatter};
 
-use serde_json;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegisterData {
-    pub instance: Instance,
-    pub data_center_info: DataCenterInfo,
-    pub lease_info: Option<LeaseInfo>,
-    pub dc_name_type: DcNameType,
-    pub status_type: StatusType,
-    // This is a typo on Eureka's side
-    #[serde(rename = "amazonMetdataType")]
-    pub amazon_metadata_type: Option<AmazonMetadataType>,
-    pub app_metadata_type: HashMap<String, String>,
-}
-
-impl From<Instance> for RegisterData {
-    fn from(instance: Instance) -> Self {
-        RegisterData {
-            data_center_info: instance.data_center_info.clone(),
-            lease_info: instance.lease_info,
-            dc_name_type: instance.data_center_info.name,
-            status_type: StatusType::Starting,
-            amazon_metadata_type: None,
-            app_metadata_type: HashMap::new(),
-            instance,
-        }
-    }
+#[derive(Debug, Clone, Serialize)]
+pub struct Register<'a> {
+    pub instance: &'a Instance,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instance {
-    /// This doubles as the instance ID, because why not Eureka?
+    /// This doubles as the instance ID, because why not, Eureka?
     pub host_name: String,
     pub app: String,
     pub ip_addr: String,
@@ -52,6 +29,27 @@ pub struct Instance {
     pub metadata: Option<HashMap<String, String>>,
 }
 
+impl Default for Instance {
+    fn default() -> Self {
+        Instance {
+            host_name: "localhost".to_string(),
+            app: env::var("CARGO_PKG_NAME").unwrap_or_default(),
+            ip_addr: "127.0.0.1".to_string(),
+            vip_address: env::var("CARGO_PKG_NAME").unwrap_or_default(),
+            secure_vip_address: env::var("CARGO_PKG_NAME").unwrap_or_default(),
+            status: StatusType::Starting,
+            port: None,
+            secure_port: PortData::new(443, false),
+            home_page_url: String::new(),
+            status_page_url: String::new(),
+            health_check_url: String::new(),
+            data_center_info: DataCenterInfo::default(),
+            lease_info: None,
+            metadata: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortData {
     #[serde(rename = "$")]
@@ -61,6 +59,13 @@ pub struct PortData {
 }
 
 impl PortData {
+    pub fn new(port: u16, enabled: bool) -> Self {
+        PortData {
+            value: port,
+            enabled: enabled.to_string(),
+        }
+    }
+
     pub fn value(&self) -> Option<u16> {
         if self.enabled == "true" {
             Some(self.value)
@@ -98,9 +103,22 @@ pub struct InstanceWrapper {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataCenterInfo {
+    #[serde(rename = "@class")]
+    class: String,
     pub name: DcNameType,
-    /// metadata is only required if name is Amazon
+    /// metadata is only allowed if name is Amazon, and then is required
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<AmazonMetadataType>,
+}
+
+impl Default for DataCenterInfo {
+    fn default() -> Self {
+        DataCenterInfo {
+            class: "com.netflix.appinfo.InstanceInfo$DefaultDataCenterInfo".into(),
+            name: DcNameType::MyOwn,
+            metadata: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
