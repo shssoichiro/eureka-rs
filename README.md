@@ -17,7 +17,7 @@ This project is currently in an **alpha state** as indicated by the version numb
 
 ## Installation
 
-Add `eureka` to your `Cargo.toml` and add `extern crate eureka` to your project's root.
+Add `eureka-client` to your `Cargo.toml` and add `extern crate eureka_client` to your project's root.
 
 ## Usage
 

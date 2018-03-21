@@ -1,11 +1,11 @@
 [package]
 authors = ["Josh Holmer <jholmer.in@gmail.com>"]
-name = "eureka"
-description = "Handles HTTP requests to and optionally registering a service with Eureka"
+name = "eureka-client"
+description = "Handles HTTP requests to and registering a service with Eureka"
 repository = "https://github.com/shssoichiro/eureka-rs"
 readme = "README.md"
 license = "MIT"
-documentation = "https://docs.rs/eureka"
+documentation = "https://docs.rs/eureka-client"
 version = "0.0.1"
 
 [badges]
