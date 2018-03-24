@@ -10,9 +10,9 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 
-use reqwest::{Client as ReqwestClient, Error as ReqwestError, Method, Response, StatusCode};
-use reqwest::header::{qitem, Accept};
-use reqwest::mime;
+pub use reqwest::{Error as ReqwestError, Method, Response, StatusCode};
+use reqwest::{Client as ReqwestClient, mime};
+use reqwest::header::{Accept, qitem};
 pub use self::instance::{Instance, PortData, StatusType};
 use self::instance::InstanceClient;
 use self::registry::RegistryClient;
