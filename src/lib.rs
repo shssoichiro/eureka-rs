@@ -11,8 +11,9 @@ extern crate serde_derive;
 extern crate serde_json;
 
 pub use reqwest::{Error as ReqwestError, Method, Response, StatusCode};
-use reqwest::{Client as ReqwestClient, mime};
-use reqwest::header::{Accept, qitem};
+use reqwest::{mime, Client as ReqwestClient};
+pub use reqwest::header::{self, Header, Headers};
+use reqwest::header::{qitem, Accept};
 pub use self::instance::{Instance, PortData, StatusType};
 use self::instance::InstanceClient;
 use self::registry::RegistryClient;
@@ -132,12 +133,20 @@ impl EurekaClient {
         }
     }
 
+    /// Sends a request to another app in this eureka cluster, and returns the response.
+    ///
+    /// This method assumes that your services all communicate using JSON.
+    /// Future methods may be added to allow other request body types.
+    ///
+    /// `Accept: "application/json"` is preset on all requests by this method.
+    /// You can add additional headers such as `Authorization` using the `headers` parameter.
     pub fn make_request<V: Serialize>(
         &self,
         app: &str,
         path: &str,
         method: Method,
         body: &V,
+        mut headers: Headers,
     ) -> Result<Response, EurekaError> {
         let instance = self.registry.get_instance_by_app_name(app);
         if let Some(instance) = instance {
@@ -149,6 +158,7 @@ impl EurekaClient {
             } else {
                 instance.port.and_then(|port| port.value()).unwrap_or(8080)
             };
+            headers.set(Accept(vec![qitem(mime::APPLICATION_JSON)]));
             self.client
                 .request(
                     method,
@@ -160,7 +170,7 @@ impl EurekaClient {
                         path.trim_left_matches('/')
                     ),
                 )
-                .header(Accept(vec![qitem(mime::APPLICATION_JSON)]))
+                .headers(headers)
                 .json(body)
                 .send()
                 .map_err(EurekaError::Network)

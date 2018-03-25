@@ -6,7 +6,7 @@ repository = "https://github.com/shssoichiro/eureka-rs"
 readme = "README.md"
 license = "MIT"
 documentation = "https://docs.rs/eureka-client"
-version = "0.0.2"
+version = "0.0.3"
 
 [badges]
 maintenance = { status = "actively-developed" }
