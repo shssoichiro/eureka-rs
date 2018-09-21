@@ -1,13 +1,13 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use itertools::Itertools;
 
-use rest::EurekaRestClient;
 use rest::structures::Instance;
+use rest::EurekaRestClient;
 
 #[derive(Debug)]
 pub struct RegistryClient {

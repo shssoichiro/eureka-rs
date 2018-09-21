@@ -1,10 +1,10 @@
-use EurekaError;
-use rest::EurekaRestClient;
 pub use rest::structures::{Instance, PortData, StatusType};
-use std::sync::Arc;
+use rest::EurekaRestClient;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use EurekaError;
 
 #[derive(Debug)]
 pub struct InstanceClient {
@@ -56,7 +56,7 @@ impl InstanceClient {
 
         while let Err(e) =
             self.client
-                .update_status(&self.config.app, &self.config.host_name, &StatusType::Up)
+                .update_status(&self.config.app, &self.config.host_name, StatusType::Up)
         {
             error!("Failed to set app to UP: {}", e);
             thread::sleep(Duration::from_secs(15));
@@ -67,7 +67,8 @@ impl InstanceClient {
 impl Drop for InstanceClient {
     fn drop(&mut self) {
         self.is_running.store(false, Ordering::Relaxed);
-        let _ = self.client
+        let _ = self
+            .client
             .deregister(&self.config.app, &self.config.host_name);
     }
 }

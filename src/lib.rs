@@ -10,20 +10,19 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 
-pub use reqwest::{Error as ReqwestError, Method, Response, StatusCode};
-use reqwest::{mime, Client as ReqwestClient};
-pub use reqwest::header::{self, Header, Headers};
-use reqwest::header::{qitem, Accept};
-pub use self::instance::{Instance, PortData, StatusType};
 use self::instance::InstanceClient;
+pub use self::instance::{Instance, PortData, StatusType};
 use self::registry::RegistryClient;
+use reqwest::header::HeaderMap;
+use reqwest::Client as ReqwestClient;
+pub use reqwest::{Error as ReqwestError, Method, Response, StatusCode};
 use serde::Serialize;
 
 mod aws;
 mod instance;
 mod registry;
-mod rest;
 mod resolver;
+mod rest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -146,7 +145,7 @@ impl EurekaClient {
         path: &str,
         method: Method,
         body: &V,
-        mut headers: Headers,
+        mut headers: HeaderMap,
     ) -> Result<Response, EurekaError> {
         let instance = self.registry.get_instance_by_app_name(app);
         if let Some(instance) = instance {
@@ -158,7 +157,7 @@ impl EurekaClient {
             } else {
                 instance.port.and_then(|port| port.value()).unwrap_or(8080)
             };
-            headers.set(Accept(vec![qitem(mime::APPLICATION_JSON)]));
+            headers.insert("Accept", "application/json".parse().unwrap());
             self.client
                 .request(
                     method,
@@ -169,8 +168,7 @@ impl EurekaClient {
                         port,
                         path.trim_left_matches('/')
                     ),
-                )
-                .headers(headers)
+                ).headers(headers)
                 .json(body)
                 .send()
                 .map_err(EurekaError::Network)

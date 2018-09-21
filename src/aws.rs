@@ -59,31 +59,30 @@ impl AwsMetadata {
     }
 
     fn lookup_metadata_key(&self, key: &str) -> Option<String> {
-        let mut response = self.client
+        let mut response = self
+            .client
             .get(&format!("http://{}/latest/meta-data/{}", self.host, key))
             .send()
             .and_then(Response::error_for_status)
             .map_err(|e| {
                 error!("Error requesting metadata key: {}", e);
                 e
-            })
-            .ok()?;
+            }).ok()?;
         response.text().ok()
     }
 
     fn lookup_instance_identity(&self) -> Option<HashMap<String, Value>> {
-        let mut response = self.client
+        let mut response = self
+            .client
             .get(&format!(
                 "http://{}/latest/dynamic/instance-identity/document",
                 self.host
-            ))
-            .send()
+            )).send()
             .and_then(Response::error_for_status)
             .map_err(|e| {
                 error!("Error requesting instance identity document: {}", e);
                 e
-            })
-            .ok()?;
+            }).ok()?;
         response.json().ok()
     }
 }
